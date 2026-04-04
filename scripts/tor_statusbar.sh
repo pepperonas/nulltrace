@@ -5,12 +5,27 @@
 # File should be named: nulltrace_status.5s.sh (updates every 5 seconds)
 
 # Dynamische Pfaderkennung
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/lib/utils.sh" 2>/dev/null
+# Plugin läuft aus SwiftBar Plugins-Verzeichnis, nicht aus dem Repo
+NULLTRACE_DIR=""
 
-NULLTRACE_DIR="$(detect_nulltrace_dir 2>/dev/null)"
-if [ -z "$NULLTRACE_DIR" ]; then
-    # Fallback: relativ zum Script-Verzeichnis
+# 1. Gespeicherter Install-Pfad
+if [ -f "$HOME/.nulltrace/install_path" ]; then
+    NULLTRACE_DIR="$(cat "$HOME/.nulltrace/install_path")"
+fi
+
+# 2. Bekannte Orte
+if [ -z "$NULLTRACE_DIR" ] || [ ! -f "$NULLTRACE_DIR/nulltrace.sh" ]; then
+    for dir in "$HOME/claude/nulltrace" "$HOME/nulltrace" "$HOME/apps/nulltrace"; do
+        if [ -f "$dir/nulltrace.sh" ]; then
+            NULLTRACE_DIR="$dir"
+            break
+        fi
+    done
+fi
+
+# 3. Fallback: relativ zum Script
+if [ -z "$NULLTRACE_DIR" ] || [ ! -f "$NULLTRACE_DIR/nulltrace.sh" ]; then
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     NULLTRACE_DIR="$(dirname "$SCRIPT_DIR")"
 fi
 

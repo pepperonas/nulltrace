@@ -119,7 +119,7 @@ scripts/
 - Tor (`brew install tor`)
 - jq (`brew install jq`)
 - ProxyChains (`brew install proxychains-ng`)
-- SwiftBar (optional, for menu bar integration)
+- SwiftBar (optional, for menu bar integration — **Note:** SwiftBar 2.0.1 does not render menu bar items on macOS 26 Tahoe. CLI works fully without it.)
 
 ## Migration from xxxOS
 
