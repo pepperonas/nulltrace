@@ -1,31 +1,30 @@
 #!/bin/bash
 
-# Tor Control Script für macOS
+# nulltrace Tor Control Script für macOS
 # Usage: ./tor_control.sh {start|stop|status|proxy-on|proxy-off|full-on|full-off}
 
-# SwiftBar Helper einbinden
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Utils laden
+source "$SCRIPT_DIR/lib/utils.sh"
+
+# SwiftBar Helper einbinden
 if [ -f "$SCRIPT_DIR/swiftbar_helper.sh" ]; then
     source "$SCRIPT_DIR/swiftbar_helper.sh"
 fi
 
-# Netzwerk-Interface automatisch erkennen (meist "Wi-Fi")
-NETWORK_SERVICE=$(networksetup -listallnetworkservices | grep -E "(Wi-Fi|WiFi)" | head -1)
-
-if [ -z "$NETWORK_SERVICE" ]; then
-    echo "⚠️  Warnung: Wi-Fi Interface nicht gefunden. Verwende 'Wi-Fi'"
-    NETWORK_SERVICE="Wi-Fi"
-fi
+# Netzwerk-Interface automatisch erkennen
+NETWORK_SERVICE="$(get_effective_wifi_service)"
 
 start_tor() {
     echo "🚀 Starte Tor..."
     brew services start tor
     sleep 3
-    
-    if lsof -i :9050 > /dev/null 2>&1; then
-        echo "✅ Tor läuft auf Port 9050"
-        # Teste Verbindung
-        local test_result=$(curl --socks5 localhost:9050 --connect-timeout 5 -s https://check.torproject.org/api/ip 2>/dev/null | grep '"IsTor":true')
+
+    if lsof -i :"$(get_config TOR_SOCKS_PORT 9050)" > /dev/null 2>&1; then
+        echo "✅ Tor läuft auf Port $(get_config TOR_SOCKS_PORT 9050)"
+        local test_result
+        test_result=$(curl --socks5 "localhost:$(get_config TOR_SOCKS_PORT 9050)" --connect-timeout 5 -s https://check.torproject.org/api/ip 2>/dev/null | grep '"IsTor":true')
         if [ -n "$test_result" ]; then
             echo "✅ Tor-Verbindung erfolgreich getestet"
         else
@@ -38,21 +37,19 @@ start_tor() {
 
 stop_tor() {
     echo "🛑 Stoppe Tor..."
-    
-    # Prüfe ob Tor als root läuft
+
     if brew services list | grep "tor" | grep -q "root"; then
         echo "⚠️  Tor läuft als root - verwende sudo"
         sudo brew services stop tor
     else
         brew services stop tor
     fi
-    
+
     killall tor 2>/dev/null
     sudo killall tor 2>/dev/null
     sleep 1
-    
-    # Prüfe, ob Tor wirklich gestoppt ist
-    if ! pgrep -x "tor" > /dev/null 2>&1 && ! netstat -an | grep -E "\.9050.*LISTEN" > /dev/null 2>&1; then
+
+    if ! pgrep -x "tor" > /dev/null 2>&1 && ! lsof -i :"$(get_config TOR_SOCKS_PORT 9050)" > /dev/null 2>&1; then
         echo "✅ Tor gestoppt"
     else
         echo "❌ Tor läuft noch - versuche forciertes Stoppen"
@@ -60,82 +57,72 @@ stop_tor() {
         sleep 2
         if ! pgrep -x "tor" > /dev/null 2>&1; then
             echo "✅ Tor forciert gestoppt"
-            # SwiftBar neustarten
-            silent_restart_swiftbar
         else
             echo "❌ Tor konnte nicht gestoppt werden"
-            # SwiftBar neustarten
-            silent_restart_swiftbar
         fi
+        silent_restart_swiftbar 2>/dev/null
     fi
 }
 
 enable_system_proxy() {
     echo "🔒 Aktiviere systemweiten SOCKS-Proxy..."
-    
-    # SOCKS5-Proxy für Tor setzen
-    networksetup -setsocksfirewallproxy "$NETWORK_SERVICE" 127.0.0.1 9050
+
+    networksetup -setsocksfirewallproxy "$NETWORK_SERVICE" 127.0.0.1 "$(get_config TOR_SOCKS_PORT 9050)"
     networksetup -setsocksfirewallproxystate "$NETWORK_SERVICE" on
-    
-    # Auch HTTP/HTTPS-Proxy über Polipo oder direkt über Tor setzen (falls unterstützt)
-    # Viele macOS-Apps nutzen HTTP-Proxy statt SOCKS
+
     echo "🌐 Konfiguriere zusätzliche Proxy-Einstellungen..."
-    
-    # HTTP-Proxy deaktivieren um SOCKS zu forcieren
     networksetup -setwebproxystate "$NETWORK_SERVICE" off
     networksetup -setsecurewebproxystate "$NETWORK_SERVICE" off
-    
+
     echo "✅ Systemweiter SOCKS5-Proxy aktiviert für: $NETWORK_SERVICE"
     echo "📌 Wichtig: Nicht alle Apps respektieren System-Proxy-Einstellungen"
     echo "   → Safari, Chrome: ✅ Funktioniert"
     echo "   → Terminal (curl, wget): ❌ Braucht explizite SOCKS5-Config"
     echo "   → Für Terminal: Verwende proxychains4 oder torcurl"
-    
 }
 
 disable_system_proxy() {
     echo "🔓 Deaktiviere systemweiten SOCKS-Proxy..."
     networksetup -setsocksfirewallproxystate "$NETWORK_SERVICE" off
-    
-    # Stelle sicher, dass alle Proxy-Einstellungen deaktiviert sind
     networksetup -setwebproxystate "$NETWORK_SERVICE" off 2>/dev/null
     networksetup -setsecurewebproxystate "$NETWORK_SERVICE" off 2>/dev/null
-    
+
     echo "✅ Systemweiter Proxy deaktiviert für: $NETWORK_SERVICE"
     echo "🌐 Normale Internet-Verbindung wiederhergestellt"
-    
 }
 
 show_status() {
     echo "📊 Tor Status:"
     echo "=============="
-    
-    # Service Status
-    local service_status=$(brew services list | grep tor | awk '{print $2}')
+
+    local service_status
+    service_status=$(brew services list | grep tor | awk '{print $2}')
     echo "Service: $service_status"
-    
-    # Port Check (nur aktive LISTEN-Verbindungen)
-    if netstat -an | grep -E "\.9050.*LISTEN" > /dev/null 2>&1; then
-        echo "Port 9050: ✅ Aktiv"
+
+    if lsof -i :"$(get_config TOR_SOCKS_PORT 9050)" > /dev/null 2>&1; then
+        echo "Port $(get_config TOR_SOCKS_PORT 9050): ✅ Aktiv"
     else
-        echo "Port 9050: ❌ Inaktiv"
+        echo "Port $(get_config TOR_SOCKS_PORT 9050): ❌ Inaktiv"
     fi
-    
-    # Proxy Status
-    local proxy_state=$(networksetup -getsocksfirewallproxy "$NETWORK_SERVICE" | grep "Enabled: Yes")
+
+    local proxy_state
+    proxy_state=$(networksetup -getsocksfirewallproxy "$NETWORK_SERVICE" | grep "Enabled: Yes")
     if [ -n "$proxy_state" ]; then
         echo "System-Proxy: ✅ Aktiviert"
         networksetup -getsocksfirewallproxy "$NETWORK_SERVICE" | grep -E "(Server|Port)"
     else
         echo "System-Proxy: ❌ Deaktiviert"
     fi
-    
-    # Connection Test - Mit korrekter SOCKS5 und IPv4
+
     echo ""
     echo "🔍 Verbindungstest:"
-    local current_ip=$(curl -4 -s --connect-timeout 5 --socks5 localhost:9050 https://check.torproject.org/api/ip 2>/dev/null | jq -r '.IP' 2>/dev/null || echo "Fehler")
-    local is_tor=$(curl -4 -s --connect-timeout 5 --socks5 localhost:9050 https://check.torproject.org/api/ip 2>/dev/null | jq -r '.IsTor' 2>/dev/null || echo "false")
-    
+    local tor_port
+    tor_port="$(get_config TOR_SOCKS_PORT 9050)"
+    local current_ip
+    current_ip=$(secure_curl "https://check.torproject.org/api/ip" --socks5 "localhost:$tor_port" 2>/dev/null | jq -r '.IP' 2>/dev/null || echo "Fehler")
+    local is_tor
+    is_tor=$(secure_curl "https://check.torproject.org/api/ip" --socks5 "localhost:$tor_port" 2>/dev/null | jq -r '.IsTor' 2>/dev/null || echo "false")
+
     if [ "$is_tor" = "true" ]; then
         echo "Aktuelle IP: $current_ip (🔒 über Tor)"
     else
@@ -145,21 +132,24 @@ show_status() {
 
 test_connection() {
     echo "🧪 Teste Tor-Verbindung..."
-    
-    # Direkt über SOCKS5 - IPv4 erzwingen
+    local tor_port
+    tor_port="$(get_config TOR_SOCKS_PORT 9050)"
+
     echo "Test 1: Direkter SOCKS5-Test"
-    local socks_result=$(curl -4 --socks5 localhost:9050 --connect-timeout 10 -s https://check.torproject.org/api/ip 2>/dev/null)
+    local socks_result
+    socks_result=$(curl -4 --socks5 "localhost:$tor_port" --connect-timeout 10 -s https://check.torproject.org/api/ip 2>/dev/null)
     if echo "$socks_result" | grep -q '"IsTor":true'; then
         echo "✅ SOCKS5: Funktioniert"
         echo "$socks_result" | jq . 2>/dev/null || echo "$socks_result"
     else
         echo "❌ SOCKS5: Fehlgeschlagen"
     fi
-    
+
     echo ""
     echo "Test 2: ProxyChains-Test"
     if command -v proxychains4 > /dev/null 2>&1; then
-        local proxy_result=$(proxychains4 curl -4 --connect-timeout 10 -s https://check.torproject.org/api/ip 2>/dev/null)
+        local proxy_result
+        proxy_result=$(proxychains4 curl -4 --connect-timeout 10 -s https://check.torproject.org/api/ip 2>/dev/null)
         if echo "$proxy_result" | grep -q '"IsTor":true'; then
             echo "✅ ProxyChains: Funktioniert"
             echo "$proxy_result" | jq . 2>/dev/null || echo "$proxy_result"
@@ -169,41 +159,40 @@ test_connection() {
     else
         echo "⚠️  ProxyChains nicht installiert"
     fi
-    
+
     echo ""
     echo "Test 3: System-Proxy-Test (funktioniert nicht mit curl)"
-    local system_result=$(curl --connect-timeout 10 -s https://check.torproject.org/api/ip 2>/dev/null)
     echo "ℹ️  Curl nutzt System-Proxy nicht. Teste mit Safari:"
     echo "   → Öffne Safari und gehe zu: https://check.torproject.org"
     echo "   → Oder nutze: proxychains4 curl https://check.torproject.org/api/ip"
 }
 
-# Neue Tor Identity anfordern
 new_identity() {
     echo "🔄 Fordere neue Tor-Identität an..."
-    
-    # Prüfe ob Tor läuft
+
     if ! pgrep -x "tor" > /dev/null 2>&1; then
         echo "❌ Tor läuft nicht. Starte Tor zuerst."
         return 1
     fi
-    
-    # Sende SIGHUP an Tor Prozess für neue Circuit
+
     if pkill -HUP tor 2>/dev/null; then
         echo "✅ Signal gesendet. Warte auf neue Verbindung..."
         sleep 3
-        
-        # Teste neue Verbindung
-        local new_ip=$(curl -4 -s --connect-timeout 5 --socks5 localhost:9050 http://icanhazip.com 2>/dev/null)
+
+        local tor_port
+        tor_port="$(get_config TOR_SOCKS_PORT 9050)"
+        local new_ip
+        new_ip=$(secure_curl "https://icanhazip.com" --socks5 "localhost:$tor_port" 2>/dev/null)
         if [ -n "$new_ip" ]; then
             echo "✅ Neue IP-Adresse: $new_ip"
-            
-            # Hole Standort Info
-            local location_info=$(curl -4 -s --connect-timeout 3 --socks5 localhost:9050 "http://ip-api.com/json/${new_ip}?fields=city,country" 2>/dev/null)
-            if [ -n "$location_info" ] && echo "$location_info" | grep -q '"city"'; then
-                local city=$(echo "$location_info" | grep -o '"city":"[^"]*' | cut -d'"' -f4)
-                local country=$(echo "$location_info" | grep -o '"country":"[^"]*' | cut -d'"' -f4)
-                echo "📍 Neuer Standort: $city, $country"
+
+            local location_info
+            location_info=$(secure_curl "https://ipapi.co/${new_ip}/json/" --socks5 "localhost:$tor_port" 2>/dev/null)
+            if [ -n "$location_info" ]; then
+                local city country
+                city=$(echo "$location_info" | jq -r '.city // empty' 2>/dev/null)
+                country=$(echo "$location_info" | jq -r '.country_name // empty' 2>/dev/null)
+                [ -n "$city" ] && [ -n "$country" ] && echo "📍 Neuer Standort: $city, $country"
             fi
         else
             echo "⚠️  Konnte neue IP nicht abrufen"
@@ -214,7 +203,7 @@ new_identity() {
     fi
 }
 
-case "$1" in
+case "${1:-}" in
     start)
         start_tor
         ;;

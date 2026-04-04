@@ -1,89 +1,97 @@
 #!/bin/bash
 
-# xxxOS Control Script
+# nulltrace Control Script
 # Zentrales Steuerungsskript für Privacy-Tools
 # (c) 2025 Martin Pfeffer - MIT License
 
+set -uo pipefail
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Shared Utility Library laden
+source "$SCRIPT_DIR/scripts/lib/utils.sh"
+
+# Konfiguration laden
+load_config
+
+# Migration von xxxOS (einmalig)
+migrate_from_xxxos
+
+# Install-Pfad speichern
+save_install_path "$SCRIPT_DIR"
+
+# Script-Pfade
 TOR_SCRIPT="$SCRIPT_DIR/scripts/tor_control.sh"
 MAC_SCRIPT="$SCRIPT_DIR/scripts/mac_spoofer.sh"
 PRIVACY_SCRIPT="$SCRIPT_DIR/scripts/privacy_enhance.sh"
 PROXYCHAINS_SCRIPT="$SCRIPT_DIR/scripts/proxychains_setup.sh"
 VPN_SCRIPT="$SCRIPT_DIR/scripts/vpn_control.sh"
-
-# Farben für die Ausgabe
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[0;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+KILLSWITCH_SCRIPT="$SCRIPT_DIR/scripts/lib/killswitch.sh"
 
 # Sudo-Berechtigung am Anfang anfordern und für Session cachen
 cache_sudo() {
     # IMMER erst prüfen ob sudoers-Konfiguration funktioniert
     if sudo -n dscacheutil -flushcache >/dev/null 2>&1; then
-        # Sudoers funktioniert - NIEMALS Cache-Helper verwenden
         return 0
     fi
-    
+
     # Verwende globalen Sudo-Cache nur wenn sudoers nicht funktioniert
     if ! sudo -n true 2>/dev/null; then
         "$SCRIPT_DIR/scripts/sudo_cache_helper.sh" start
     fi
 }
 
-# Cleanup-Funktion für sudo-keeper
-cleanup_sudo_keeper() {
-    # Cleanup wird jetzt vom globalen Cache-Helper gehandhabt
+# Cleanup-Funktion
+cleanup() {
+    # Runtime-Dateien aufräumen bei Exit
     :
 }
+trap cleanup EXIT INT TERM HUP
 
-# Trap für Cleanup bei Script-Ende
-trap cleanup_sudo_keeper EXIT
-
-# Stylisches Banner anzeigen
+# Banner anzeigen
 show_banner() {
 echo -e "${GREEN}"
-echo "  ╔════════════════════════════════════════════════════════════╗"
-echo "  ║                                                            ║"
-echo "  ║              ██╗  ██╗██╗  ██╗██╗  ██╗ ██████╗ ███████╗    ║"
-echo "  ║              ╚██╗██╔╝╚██╗██╔╝╚██╗██╔╝██╔═══██╗██╔════╝    ║"
-echo "  ║               ╚███╔╝  ╚███╔╝  ╚███╔╝ ██║   ██║███████╗    ║"
-echo "  ║               ██╔██╗  ██╔██╗  ██╔██╗ ██║   ██║╚════██║    ║"
-echo "  ║              ██╔╝ ██╗██╔╝ ██╗██╔╝ ██╗╚██████╔╝███████║    ║"
-echo "  ║              ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝ ╚══════╝    ║"
-echo "  ║                                                            ║"
-echo "  ║               🔒 Privacy & Anonymity Suite 🔒             ║"
-echo "  ║                                                            ║"
-echo "  ║                    Fire & Forget Privacy                  ║"
-echo "  ║                                                            ║"
-echo "  ╚════════════════════════════════════════════════════════════╝"
-echo -e "${BLUE}                        v2.0 - Simplified Edition               ${NC}"
-echo -e "${RED}                      by Martin Pfeffer                       ${NC}"
+echo "  ╔════════════════════════════════════════════════════════════════════╗"
+echo "  ║                                                                    ║"
+echo "  ║   ███╗   ██╗██╗   ██╗██╗     ██╗  ████████╗██████╗  █████╗  ██████╗███████╗  ║"
+echo "  ║   ████╗  ██║██║   ██║██║     ██║  ╚══██╔══╝██╔══██╗██╔══██╗██╔════╝██╔════╝  ║"
+echo "  ║   ██╔██╗ ██║██║   ██║██║     ██║     ██║   ██████╔╝███████║██║     █████╗    ║"
+echo "  ║   ██║╚██╗██║██║   ██║██║     ██║     ██║   ██╔══██╗██╔══██║██║     ██╔══╝    ║"
+echo "  ║   ██║ ╚████║╚██████╔╝███████╗███████╗██║   ██║  ██║██║  ██║╚██████╗███████╗  ║"
+echo "  ║   ╚═╝  ╚═══╝ ╚═════╝ ╚══════╝╚══════╝╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝╚══════╝  ║"
+echo "  ║                                                                    ║"
+echo "  ║                  🔒 Privacy & Anonymity Suite 🔒                  ║"
+echo "  ║                                                                    ║"
+echo "  ║                       Fire & Forget Privacy                       ║"
+echo "  ║                                                                    ║"
+echo "  ╚════════════════════════════════════════════════════════════════════╝"
+echo -e "${BLUE}                          v3.0 - nulltrace                          ${NC}"
+echo -e "${RED}                        by Martin Pfeffer                           ${NC}"
 echo ""
 }
 
-# Vereinfachte Hilfe anzeigen
+# Hilfe anzeigen
 show_help() {
     echo -e "${BLUE}  ╔════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${BLUE}  ║                        xxxOS HILFE                        ║${NC}"
+    echo -e "${BLUE}  ║                    nulltrace HILFE                         ║${NC}"
     echo -e "${BLUE}  ╚════════════════════════════════════════════════════════════╝${NC}"
     echo ""
-    echo -e "${GREEN}📋 Hauptfunktionen:${NC}"
+    echo -e "${GREEN}Hauptfunktionen:${NC}"
     echo ""
-    echo -e "  ${YELLOW}./xxxos.sh${NC}              → Interaktives Menü"
-    echo -e "  ${YELLOW}./xxxos.sh privacy-on${NC}   → 🔒 Maximale Privatsphäre aktivieren"
-    echo -e "  ${YELLOW}./xxxos.sh privacy-off${NC}  → 🌐 Normale Einstellungen wiederherstellen"
-    echo -e "  ${YELLOW}./xxxos.sh status${NC}       → 📊 Privacy-Status anzeigen"
-    echo -e "  ${YELLOW}./xxxos.sh help${NC}         → Diese Hilfe anzeigen"
+    echo -e "  ${YELLOW}./nulltrace.sh${NC}              → Interaktives Menü"
+    echo -e "  ${YELLOW}./nulltrace.sh privacy-on${NC}   → 🔒 Maximale Privatsphäre aktivieren"
+    echo -e "  ${YELLOW}./nulltrace.sh privacy-off${NC}  → 🌐 Normale Einstellungen wiederherstellen"
+    echo -e "  ${YELLOW}./nulltrace.sh status${NC}       → 📊 Privacy-Status anzeigen"
+    echo -e "  ${YELLOW}./nulltrace.sh help${NC}         → Diese Hilfe anzeigen"
     echo ""
     echo -e "${GREEN}🔥 Was macht 'privacy-on'?${NC}"
     echo -e "  ${GREEN}✓${NC} MAC-Adresse ändern (bleibt permanent)"
-    echo -e "  ${GREEN}✓${NC} Hostname auf 'Lisa' setzen"
+    echo -e "  ${GREEN}✓${NC} Hostname auf '$(get_config PRIVACY_HOSTNAME Lisa)' setzen"
     echo -e "  ${GREEN}✓${NC} Tor system-weit aktivieren"
     echo -e "  ${GREEN}✓${NC} DNS auf Cloudflare umstellen"
     echo -e "  ${GREEN}✓${NC} Firewall mit Stealth-Mode"
     echo -e "  ${GREEN}✓${NC} Tracking-Domains blockieren"
+    echo -e "  ${GREEN}✓${NC} Kill-Switch (optional, konfigurierbar)"
     echo -e "  ${GREEN}✓${NC} Browser-Daten bleiben erhalten!"
     echo ""
     echo -e "${GREEN}🔄 Was macht 'privacy-off'?${NC}"
@@ -91,56 +99,49 @@ show_help() {
     echo -e "  ${GREEN}✓${NC} Tor deaktivieren"
     echo -e "  ${GREEN}✓${NC} DNS-Einstellungen zurücksetzen"
     echo -e "  ${GREEN}✓${NC} Tracking-Blocks entfernen"
+    echo -e "  ${GREEN}✓${NC} Kill-Switch deaktivieren"
     echo -e "  ${YELLOW}!${NC} MAC-Adresse bleibt geändert (Sicherheit)"
+    echo ""
+    echo -e "${GREEN}Erweiterte Befehle:${NC}"
+    echo -e "  ${YELLOW}./nulltrace.sh killswitch on${NC}   → Kill-Switch aktivieren"
+    echo -e "  ${YELLOW}./nulltrace.sh killswitch off${NC}  → Kill-Switch deaktivieren"
     echo ""
     echo -e "${RED}💡 Tipp:${NC} Für maximale Sicherheit verwende den Tor Browser!"
     echo ""
 }
 
-# Intelligenter Dependency-Check und Auto-Installation
+# Dependency-Check und Auto-Installation
 check_dependencies() {
     local missing_deps=()
     local missing_scripts=()
-    local auto_install=false
-    
+
     echo -e "${BLUE}🔍 Prüfe System-Abhängigkeiten...${NC}"
-    
-    # Kritische Befehle prüfen
+
     command -v curl >/dev/null 2>&1 || missing_deps+=("curl")
     command -v jq >/dev/null 2>&1 || missing_deps+=("jq")
     command -v networksetup >/dev/null 2>&1 || missing_deps+=("networksetup")
     command -v ifconfig >/dev/null 2>&1 || missing_deps+=("ifconfig")
     command -v scutil >/dev/null 2>&1 || missing_deps+=("scutil")
-    
-    # Homebrew prüfen
+
     if ! command -v brew >/dev/null 2>&1; then
         missing_deps+=("homebrew")
     fi
-    
-    # Tor prüfen
-    if ! command -v tor >/dev/null 2>&1; then
-        missing_deps+=("tor")
-    fi
-    
-    # ProxyChains prüfen
-    if ! command -v proxychains4 >/dev/null 2>&1; then
-        missing_deps+=("proxychains-ng")
-    fi
-    
-    # Skripte prüfen
+
+    command -v tor >/dev/null 2>&1 || missing_deps+=("tor")
+    command -v proxychains4 >/dev/null 2>&1 || missing_deps+=("proxychains-ng")
+
     [ ! -f "$TOR_SCRIPT" ] && missing_scripts+=("tor_control.sh")
     [ ! -f "$MAC_SCRIPT" ] && missing_scripts+=("mac_spoofer.sh")
     [ ! -f "$PRIVACY_SCRIPT" ] && missing_scripts+=("privacy_enhance.sh")
-    
-    # Ergebnisse anzeigen
+
     if [ ${#missing_deps[@]} -eq 0 ] && [ ${#missing_scripts[@]} -eq 0 ]; then
         echo -e "${GREEN}✅ Alle Abhängigkeiten vorhanden${NC}"
         return 0
     fi
-    
+
     echo ""
     echo -e "${YELLOW}⚠️  Fehlende Abhängigkeiten gefunden:${NC}"
-    
+
     if [ ${#missing_deps[@]} -gt 0 ]; then
         echo ""
         echo "Fehlende Programme:"
@@ -148,7 +149,7 @@ check_dependencies() {
             echo "  ❌ $dep"
         done
     fi
-    
+
     if [ ${#missing_scripts[@]} -gt 0 ]; then
         echo ""
         echo "Fehlende Skripte:"
@@ -158,13 +159,12 @@ check_dependencies() {
         echo -e "${RED}Kritische Skripte fehlen! Prüfe die Installation.${NC}"
         exit 1
     fi
-    
-    # Auto-Installation anbieten
+
     if [ ${#missing_deps[@]} -gt 0 ]; then
         echo ""
         read -p "Möchtest du die fehlenden Abhängigkeiten automatisch installieren? (j/N): " -n 1 -r
         echo ""
-        
+
         if [[ $REPLY =~ ^[Jj]$ ]]; then
             install_dependencies "${missing_deps[@]}"
         else
@@ -174,13 +174,12 @@ check_dependencies() {
     fi
 }
 
-# Automatische Installation der Abhängigkeiten
 install_dependencies() {
     local deps=("$@")
-    
+
     echo -e "${BLUE}📦 Installiere fehlende Abhängigkeiten...${NC}"
     echo ""
-    
+
     for dep in "${deps[@]}"; do
         case "$dep" in
             homebrew)
@@ -207,23 +206,22 @@ install_dependencies() {
                 ;;
         esac
     done
-    
+
     echo ""
     echo -e "${GREEN}✅ Installation abgeschlossen!${NC}"
     echo ""
 }
 
-
 # Tor-Kontrolle
 handle_tor() {
     local transparent_script="$SCRIPT_DIR/scripts/tor_transparent.sh"
-    
-    if [ -z "$1" ]; then
+
+    if [ -z "${1:-}" ]; then
         echo -e "${RED}Fehler: Keine Aktion angegeben${NC}"
         echo "Verwende: tor {start|stop|status|full-on|full-off|trans-on|trans-off|test}"
         return 1
     fi
-    
+
     case "$1" in
         trans-on)
             if [ ! -f "$transparent_script" ]; then
@@ -260,7 +258,7 @@ handle_tor() {
     esac
 }
 
-# Einfache Status-Ausgaben
+# Status-Ausgaben
 show_progress() {
     echo -e "${GREEN}🔥 $1${NC}"
 }
@@ -269,32 +267,34 @@ show_success() {
     echo -e "${GREEN}$1${NC}"
 }
 
-# Hostname auf Lisa setzen
-set_hostname_lisa() {
-    echo "🔄 Setze Hostname auf 'Lisa'..."
-    
-    # Original-Hostname speichern falls noch nicht vorhanden
-    if [ ! -f "$HOME/.xxxos/original_hostname" ]; then
-        mkdir -p "$HOME/.xxxos"
-        scutil --get ComputerName > "$HOME/.xxxos/original_hostname" 2>/dev/null || echo "MacBook" > "$HOME/.xxxos/original_hostname"
+# Hostname setzen
+set_hostname_privacy() {
+    local hostname
+    hostname="$(get_config PRIVACY_HOSTNAME Lisa)"
+    echo "🔄 Setze Hostname auf '$hostname'..."
+
+    if [ ! -f "$HOME/.nulltrace/original_hostname" ]; then
+        mkdir -p "$HOME/.nulltrace"
+        scutil --get ComputerName > "$HOME/.nulltrace/original_hostname" 2>/dev/null || echo "MacBook" > "$HOME/.nulltrace/original_hostname"
     fi
-    
-    sudo scutil --set ComputerName "Lisa"
-    sudo scutil --set LocalHostName "Lisa"
-    sudo scutil --set HostName "Lisa"
-    echo "✅ Hostname gesetzt auf: Lisa"
+
+    sudo scutil --set ComputerName "$hostname"
+    sudo scutil --set LocalHostName "$hostname"
+    sudo scutil --set HostName "$hostname"
+    echo "✅ Hostname gesetzt auf: $hostname"
 }
 
 # Original-Hostname wiederherstellen
 restore_original_hostname() {
     echo "🔄 Stelle Original-Hostname wieder her..."
-    
-    if [ -f "$HOME/.xxxos/original_hostname" ]; then
-        ORIGINAL_NAME=$(cat "$HOME/.xxxos/original_hostname")
-        sudo scutil --set ComputerName "$ORIGINAL_NAME"
-        sudo scutil --set LocalHostName "$ORIGINAL_NAME"
-        sudo scutil --set HostName "$ORIGINAL_NAME"
-        echo "✅ Hostname wiederhergestellt: $ORIGINAL_NAME"
+
+    if [ -f "$HOME/.nulltrace/original_hostname" ]; then
+        local original_name
+        original_name=$(cat "$HOME/.nulltrace/original_hostname")
+        sudo scutil --set ComputerName "$original_name"
+        sudo scutil --set LocalHostName "$original_name"
+        sudo scutil --set HostName "$original_name"
+        echo "✅ Hostname wiederhergestellt: $original_name"
     else
         echo "⚠️  Keine Original-Hostname-Datei gefunden - verwende Standard"
         sudo scutil --set ComputerName "MacBook"
@@ -320,35 +320,58 @@ enable_firewall() {
     echo "✅ Firewall aktiviert"
 }
 
-# DNS auf Cloudflare setzen
+# DNS auf Privacy-Provider setzen
 set_privacy_dns() {
-    echo "🔒 Setze Privacy-DNS (Cloudflare)..."
-    NETWORK_SERVICE=$(networksetup -listallnetworkservices | grep -E "(Wi-Fi|WiFi)" | head -1)
-    networksetup -setdnsservers "$NETWORK_SERVICE" 1.1.1.1 1.0.0.1
-    echo "✅ DNS geändert zu Cloudflare (1.1.1.1)"
+    local provider
+    provider="$(get_config DNS_PROVIDER cloudflare)"
+    local dns1 dns2
+    local service
+    service="$(get_effective_wifi_service)"
+
+    case "$provider" in
+        cloudflare)
+            dns1="1.1.1.1"; dns2="1.0.0.1"
+            echo "🔒 Setze Privacy-DNS (Cloudflare)..."
+            ;;
+        quad9)
+            dns1="9.9.9.9"; dns2="149.112.112.112"
+            echo "🔒 Setze Privacy-DNS (Quad9)..."
+            ;;
+        custom)
+            dns1="$(get_config CUSTOM_DNS_1 1.1.1.1)"
+            dns2="$(get_config CUSTOM_DNS_2 1.0.0.1)"
+            echo "🔒 Setze Privacy-DNS (Custom)..."
+            ;;
+        *)
+            dns1="1.1.1.1"; dns2="1.0.0.1"
+            echo "🔒 Setze Privacy-DNS (Cloudflare)..."
+            ;;
+    esac
+
+    networksetup -setdnsservers "$service" "$dns1" "$dns2"
+    echo "✅ DNS geändert zu $dns1"
 }
 
 # DNS-Einstellungen zurücksetzen
 reset_dns_settings() {
     echo "🔄 Setze DNS-Einstellungen zurück..."
-    NETWORK_SERVICE=$(networksetup -listallnetworkservices | grep -E "(Wi-Fi|WiFi)" | head -1)
-    networksetup -setdnsservers "$NETWORK_SERVICE" "Empty"
+    local service
+    service="$(get_effective_wifi_service)"
+    networksetup -setdnsservers "$service" "Empty"
     echo "✅ DNS-Einstellungen zurückgesetzt"
 }
 
 # Tracking-Domains blockieren
 block_tracking() {
     echo "🚫 Blockiere Tracking-Domains..."
-    
-    # Backup nur wenn noch nicht vorhanden
-    if [ ! -f "/etc/hosts.xxxos.backup" ]; then
-        sudo cp /etc/hosts /etc/hosts.xxxos.backup
+
+    if [ ! -f "/etc/hosts.nulltrace.backup" ]; then
+        sudo cp /etc/hosts /etc/hosts.nulltrace.backup
     fi
-    
-    # Tracking-Domains hinzufügen
+
     cat << 'EOF' | sudo tee -a /etc/hosts > /dev/null
 
-# xxxOS Privacy Block List
+# nulltrace Privacy Block List
 0.0.0.0 google-analytics.com
 0.0.0.0 www.google-analytics.com
 0.0.0.0 googletagmanager.com
@@ -358,21 +381,21 @@ block_tracking() {
 0.0.0.0 analytics.twitter.com
 0.0.0.0 amazon-adsystem.com
 EOF
-    
+
     echo "✅ Tracking-Domains blockiert"
 }
 
 # Tracking-Blocks entfernen
 remove_tracking_blocks() {
     echo "🔄 Entferne Tracking-Blocks..."
-    
-    if [ -f "/etc/hosts.xxxos.backup" ]; then
-        sudo cp /etc/hosts.xxxos.backup /etc/hosts
-        sudo rm -f /etc/hosts.xxxos.backup
+
+    if [ -f "/etc/hosts.nulltrace.backup" ]; then
+        sudo cp /etc/hosts.nulltrace.backup /etc/hosts
+        sudo rm -f /etc/hosts.nulltrace.backup
         echo "✅ Tracking-Blocks entfernt"
     else
         echo "⚠️  Kein Backup gefunden - entferne manuell"
-        sudo sed -i.bak '/# xxxOS Privacy Block List/,$ d' /etc/hosts
+        sudo sed -i.bak '/# nulltrace Privacy Block List/,$ d' /etc/hosts
         echo "✅ Tracking-Blocks entfernt"
     fi
 }
@@ -391,83 +414,89 @@ handle_mac() {
     "$MAC_SCRIPT"
 }
 
-# Vereinfachte Privacy-Funktionen
+# Privacy-Funktionen
 handle_privacy() {
     case "$1" in
         on)
-            # Sudo-Berechtigung cachen
             cache_sudo
-            
+
             show_banner
             show_progress "Maximale Privatsphäre wird aktiviert"
             echo ""
-            
-            # 1. MAC-Adresse ändern
+
             echo -e "${BLUE}[❶] MAC-Adresse spoofing...${NC}"
             "$MAC_SCRIPT"
             echo ""
-            
-            # 2. Erweiterte Privacy-Funktionen (ohne Browser-Daten löschen)
+
             echo -e "${BLUE}[❷] Privacy-Funktionen aktivieren...${NC}"
             clear_dns_cache
-            set_hostname_lisa
+            set_hostname_privacy
             enable_firewall
             set_privacy_dns
             block_tracking
             disable_location
             echo ""
-            
-            # 3. Tor aktivieren
+
             echo -e "${BLUE}[❸] Tor-Netzwerk aktivieren...${NC}"
             "$TOR_SCRIPT" full-on
             echo ""
-            
-            # 4. ProxyChains konfigurieren
+
             echo -e "${BLUE}[❹] ProxyChains konfigurieren...${NC}"
             "$PROXYCHAINS_SCRIPT" config
             echo ""
-            
+
+            # Kill-Switch aktivieren wenn konfiguriert
+            if [ "$(get_config KILLSWITCH_ENABLED false)" = "true" ]; then
+                echo -e "${BLUE}[❺] Kill-Switch aktivieren...${NC}"
+                "$KILLSWITCH_SCRIPT" enable
+                "$KILLSWITCH_SCRIPT" monitor-start
+                echo ""
+            fi
+
             show_success "🔥 MAXIMALE PRIVATSPHÄRE AKTIVIERT!"
             echo ""
             echo -e "${GREEN}✓ Aktiviert:${NC}"
             echo "  • MAC-Adresse geändert (permanent)"
-            echo "  • Hostname: Lisa"
+            echo "  • Hostname: $(get_config PRIVACY_HOSTNAME Lisa)"
             echo "  • Tor system-weit aktiv"
-            echo "  • DNS: Cloudflare (1.1.1.1)"
+            echo "  • DNS: $(get_config DNS_PROVIDER cloudflare)"
             echo "  • Firewall: Stealth-Mode"
             echo "  • Tracking blockiert"
+            [ "$(get_config KILLSWITCH_ENABLED false)" = "true" ] && echo "  • Kill-Switch: Aktiv"
             echo "  • Browser-Daten: 🔒 Erhalten!"
             echo ""
             echo -e "${YELLOW}💡 Tipp:${NC} Verwende den Tor Browser für maximale Anonymität!"
             ;;
-            
+
         off)
-            # Sudo-Berechtigung cachen
             cache_sudo
-            
+
             show_banner
             show_progress "Normale Einstellungen werden wiederhergestellt"
             echo ""
-            
-            # 1. Tor deaktivieren
-            echo -e "${BLUE}[❶] Tor deaktivieren...${NC}"
+
+            # Kill-Switch deaktivieren
+            echo -e "${BLUE}[❶] Kill-Switch deaktivieren...${NC}"
+            "$KILLSWITCH_SCRIPT" disable 2>/dev/null
+            echo ""
+
+            echo -e "${BLUE}[❷] Tor deaktivieren...${NC}"
             "$TOR_SCRIPT" full-off
             echo ""
-            
-            # 2. Transparentes Tor falls aktiv
-            if [ -f "/tmp/tor_shell_config" ] || ls /tmp/tor_wrappers_* >/dev/null 2>&1; then
-                echo -e "${BLUE}[❷] Transparentes Tor stoppen...${NC}"
+
+            # Transparentes Tor falls aktiv
+            if [ -f "/tmp/tor_shell_config" ] || find "$NULLTRACE_RUNTIME_DIR" -name "tor_wrappers.*" -type d 2>/dev/null | grep -q .; then
+                echo -e "${BLUE}[❸] Transparentes Tor stoppen...${NC}"
                 handle_tor "trans-off"
                 echo ""
             fi
-            
-            # 3. Einstellungen zurücksetzen
-            echo -e "${BLUE}[❸] Einstellungen zurücksetzen...${NC}"
+
+            echo -e "${BLUE}[❹] Einstellungen zurücksetzen...${NC}"
             restore_original_hostname
             reset_dns_settings
             remove_tracking_blocks
             echo ""
-            
+
             show_success "🌐 NORMALE EINSTELLUNGEN WIEDERHERGESTELLT!"
             echo ""
             echo -e "${GREEN}✓ Zurückgesetzt:${NC}"
@@ -475,12 +504,13 @@ handle_privacy() {
             echo "  • Tor deaktiviert"
             echo "  • DNS-Einstellungen zurückgesetzt"
             echo "  • Tracking-Blocks entfernt"
+            echo "  • Kill-Switch deaktiviert"
             echo ""
             echo -e "${YELLOW}🔒 Hinweis:${NC} MAC-Adresse bleibt geändert (Sicherheit)"
             ;;
-            
+
         *)
-            echo -e "${RED}Fehler: Ungültige Option '$1'${NC}"
+            echo -e "${RED}Fehler: Ungültige Option '${1:-}'${NC}"
             echo "Verwende: privacy-on oder privacy-off"
             return 1
             ;;
@@ -489,13 +519,13 @@ handle_privacy() {
 
 # Security-Analyse-Funktionen
 handle_security() {
-    case "$1" in
+    case "${1:-}" in
         system|network|dns|privacy|vuln|full)
             "$SCRIPT_DIR/scripts/security_tools.sh" "$1"
             ;;
         "")
             show_banner
-            echo -e "${BLUE}🛡️ xxxOS SECURITY TOOLS${NC}"
+            echo -e "${BLUE}🛡️ nulltrace SECURITY TOOLS${NC}"
             echo "========================"
             echo ""
             echo "Verfügbare Security Checks:"
@@ -510,7 +540,7 @@ handle_security() {
             echo "Verwendung: $0 security [check-typ]"
             echo ""
             echo "Tor Security Tools:"
-            echo "  1) Transparentes Tor: ./xxxos.sh tor trans-on"
+            echo "  1) Transparentes Tor: ./nulltrace.sh tor trans-on"
             echo "     → Browser/Apps: Automatisch über Tor"
             echo "     → Terminal: source /tmp/tor_shell_config"
             echo "  2) ProxyChains: pc <command> (z.B. pc nmap, pc sqlmap)"
@@ -524,34 +554,38 @@ handle_security() {
     esac
 }
 
-
 # Gesamtstatus anzeigen
 show_overall_status() {
     show_banner
-    echo -e "${BLUE}📊 xxxOS PRIVACY STATUS${NC}"
+    echo -e "${BLUE}📊 nulltrace PRIVACY STATUS${NC}"
     echo "========================"
     echo ""
-    
+
+    local wifi_iface
+    wifi_iface="$(get_effective_wifi_interface)"
+    local wifi_svc
+    wifi_svc="$(get_effective_wifi_service)"
+
     # MAC-Adresse
     echo -e "${BLUE}[1] MAC-Adresse${NC}"
-    CURRENT_MAC=$(ifconfig en0 | grep ether | awk '{print $2}' 2>/dev/null || echo "Unbekannt")
-    echo "    └─ Aktuelle MAC: $CURRENT_MAC"
+    local current_mac
+    current_mac=$(ifconfig "$wifi_iface" 2>/dev/null | grep ether | awk '{print $2}' || echo "Unbekannt")
+    echo "    └─ Aktuelle MAC: $current_mac"
     echo ""
-    
+
     # Tor Status
     echo -e "${BLUE}[2] Tor-Netzwerk${NC}"
-    local is_tor="false"  # Standardwert setzen
-    if pgrep -x "tor" > /dev/null 2>&1 || netstat -an | grep -E "\.9050.*LISTEN" > /dev/null 2>&1; then
-        echo "    ├─ Service: ✅ Läuft (Port 9050)"
-        # Proxy Status
-        local proxy_state=$(networksetup -getsocksfirewallproxy "Wi-Fi" 2>/dev/null | grep "Enabled: Yes")
+    local is_tor="false"
+    if is_tor_running; then
+        echo "    ├─ Service: ✅ Läuft (Port $(get_config TOR_SOCKS_PORT 9050))"
+        local proxy_state
+        proxy_state=$(networksetup -getsocksfirewallproxy "$wifi_svc" 2>/dev/null | grep "Enabled: Yes")
         if [ -n "$proxy_state" ]; then
             echo "    ├─ System-Proxy: ✅ Aktiviert"
         else
             echo "    ├─ System-Proxy: ❌ Deaktiviert"
         fi
-        # IP-Check - Korrekte Tor-Prüfung mit SOCKS5 und IPv4
-        is_tor=$(curl -4 -s --connect-timeout 3 --socks5 localhost:9050 https://check.torproject.org/api/ip 2>/dev/null | jq -r '.IsTor' 2>/dev/null || echo "false")
+        is_tor=$(secure_curl "https://check.torproject.org/api/ip" --socks5 "localhost:$(get_config TOR_SOCKS_PORT 9050)" 2>/dev/null | jq -r '.IsTor' 2>/dev/null || echo "false")
         if [ "$is_tor" = "true" ]; then
             echo "    └─ Verbindung: ✅ Über Tor"
         else
@@ -561,13 +595,15 @@ show_overall_status() {
         echo "    └─ Service: ❌ Gestoppt"
     fi
     echo ""
-    
+
     # Firewall Status
     echo -e "${BLUE}[3] Firewall${NC}"
-    local fw_status=$(/usr/libexec/ApplicationFirewall/socketfilterfw --getglobalstate 2>/dev/null | grep "enabled")
+    local fw_status
+    fw_status=$(/usr/libexec/ApplicationFirewall/socketfilterfw --getglobalstate 2>/dev/null | grep "enabled")
     if [ -n "$fw_status" ]; then
         echo "    ├─ Status: ✅ Aktiviert"
-        local stealth=$(/usr/libexec/ApplicationFirewall/socketfilterfw --getstealthmode 2>/dev/null | grep "enabled")
+        local stealth
+        stealth=$(/usr/libexec/ApplicationFirewall/socketfilterfw --getstealthmode 2>/dev/null | grep "enabled")
         if [ -n "$stealth" ]; then
             echo "    └─ Stealth-Modus: ✅ Aktiviert"
         else
@@ -577,10 +613,11 @@ show_overall_status() {
         echo "    └─ Status: ❌ Deaktiviert"
     fi
     echo ""
-    
+
     # DNS Status
     echo -e "${BLUE}[4] DNS-Konfiguration${NC}"
-    local dns_servers=$(networksetup -getdnsservers "Wi-Fi" 2>/dev/null | head -2 | tr '\n' ' ')
+    local dns_servers
+    dns_servers=$(networksetup -getdnsservers "$wifi_svc" 2>/dev/null | head -2 | tr '\n' ' ')
     if [[ "$dns_servers" == *"1.1.1.1"* ]]; then
         echo "    └─ Server: ✅ Cloudflare (Privacy)"
     elif [[ "$dns_servers" == *"9.9.9.9"* ]]; then
@@ -591,23 +628,25 @@ show_overall_status() {
         echo "    └─ Server: $dns_servers"
     fi
     echo ""
-    
+
     # Hostname
     echo -e "${BLUE}[5] System-Identifikation${NC}"
-    local hostname=$(scutil --get ComputerName 2>/dev/null || echo "Unbekannt")
+    local hostname
+    hostname=$(scutil --get ComputerName 2>/dev/null || echo "Unbekannt")
     echo "    └─ Hostname: $hostname"
     echo ""
-    
+
     # Tracking-Schutz
     echo -e "${BLUE}[6] Tracking-Schutz${NC}"
-    if grep -q "# xxxOS Privacy Block List" /etc/hosts 2>/dev/null; then
-        local blocked_count=$(grep -c "^0.0.0.0" /etc/hosts 2>/dev/null || echo "0")
+    if grep -q "# nulltrace Privacy Block List" /etc/hosts 2>/dev/null; then
+        local blocked_count
+        blocked_count=$(grep -c "^0.0.0.0" /etc/hosts 2>/dev/null || echo "0")
         echo "    └─ Hosts-Datei: ✅ Modifiziert ($blocked_count Domains blockiert)"
     else
         echo "    └─ Hosts-Datei: ❌ Standard"
     fi
     echo ""
-    
+
     # Ortungsdienste
     echo -e "${BLUE}[7] Ortungsdienste${NC}"
     if pgrep -x "locationd" > /dev/null 2>&1; then
@@ -616,30 +655,37 @@ show_overall_status() {
         echo "    └─ Status: ✅ Deaktiviert"
     fi
     echo ""
-    
-    # Privacy-Level Einschätzung
+
+    # Kill-Switch
+    echo -e "${BLUE}[8] Kill-Switch${NC}"
+    if pfctl -s info 2>/dev/null | grep -q "Status: Enabled"; then
+        echo "    └─ Status: ✅ Aktiviert"
+    else
+        echo "    └─ Status: ❌ Deaktiviert"
+    fi
+    echo ""
+
+    # Privacy-Level
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     local privacy_score=0
-    
-    # Punkte berechnen (Tor wird sehr stark gewichtet)
-    # Tor-Punkte vergeben wenn: Service läuft UND (Verbindung über Tor ODER System-Proxy aktiv)
-    local tor_running=$(pgrep -x "tor" > /dev/null 2>&1 || netstat -an | grep -E "\.9050.*LISTEN" > /dev/null 2>&1; echo $?)
-    local proxy_active=$(networksetup -getsocksfirewallproxy "Wi-Fi" 2>/dev/null | grep "Enabled: Yes")
-    if [ "$tor_running" = "0" ] && ([ "$is_tor" = "true" ] || [ -n "$proxy_active" ]); then
-        privacy_score=$((privacy_score + 6))  # Tor ist wichtigster Faktor
+
+    local tor_running_check
+    tor_running_check=$(is_tor_running && echo "0" || echo "1")
+    local proxy_active
+    proxy_active=$(networksetup -getsocksfirewallproxy "$wifi_svc" 2>/dev/null | grep "Enabled: Yes")
+    if [ "$tor_running_check" = "0" ] && ([ "$is_tor" = "true" ] || [ -n "$proxy_active" ]); then
+        privacy_score=$((privacy_score + 6))
     fi
     [ -n "$fw_status" ] && privacy_score=$((privacy_score + 2))
     [[ "$dns_servers" == *"1.1.1.1"* || "$dns_servers" == *"9.9.9.9"* ]] && privacy_score=$((privacy_score + 1))
-    grep -q "# xxxOS Privacy Block List" /etc/hosts 2>/dev/null && privacy_score=$((privacy_score + 1))
+    grep -q "# nulltrace Privacy Block List" /etc/hosts 2>/dev/null && privacy_score=$((privacy_score + 1))
     ! pgrep -x "locationd" > /dev/null 2>&1 && privacy_score=$((privacy_score + 1))
-    
-    # Privacy-Level-Anzeige (ohne Tor maximal NIEDRIG)
+
     local tor_active=false
-    [ "$tor_running" = "0" ] && ([ "$is_tor" = "true" ] || [ -n "$proxy_active" ]) && tor_active=true
-    
+    [ "$tor_running_check" = "0" ] && ([ "$is_tor" = "true" ] || [ -n "$proxy_active" ]) && tor_active=true
+
     echo -n "Privacy-Level: "
     if [ "$tor_active" = true ]; then
-        # Mit Tor: Volle Skala möglich
         if [ $privacy_score -ge 9 ]; then
             echo -e "${GREEN}⬛⬛⬛⬛⬛ MAXIMUM${NC}"
         elif [ $privacy_score -ge 7 ]; then
@@ -650,7 +696,6 @@ show_overall_status() {
             echo -e "${YELLOW}⬛⬛⬜⬜⬜ NIEDRIG${NC}"
         fi
     else
-        # Ohne Tor: Maximal NIEDRIG
         if [ $privacy_score -ge 4 ]; then
             echo -e "${YELLOW}⬛⬛⬜⬜⬜ NIEDRIG${NC} (⚠️ Tor inaktiv)"
         elif [ $privacy_score -ge 2 ]; then
@@ -662,23 +707,22 @@ show_overall_status() {
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 }
 
-# Detaillierte IP-Informationen anzeigen
+# IP-Informationen
 show_ip_info() {
     show_banner
     echo -e "${BLUE}📍 IP-INFORMATIONEN${NC}"
     echo "===================="
     echo ""
-    
-    # Prüfe ob jq installiert ist
+
     if ! command -v jq &> /dev/null; then
         echo -e "${YELLOW}⚠️  jq ist nicht installiert. Installiere es mit: brew install jq${NC}"
         echo ""
     fi
-    
+
     echo -e "${BLUE}[1] Normale Verbindung${NC}"
     echo "────────────────────────"
     if command -v jq &> /dev/null; then
-        curl -s --connect-timeout 10 https://ipapi.co/json/ | jq -r '
+        secure_curl "https://ipapi.co/json/" | jq -r '
         "🌐 IP-Adresse:     " + .ip,
         "🏙️  Stadt:          " + .city,
         "🗺️  Region:         " + .region,
@@ -687,21 +731,20 @@ show_ip_info() {
         "🕐 Zeitzone:       " + .timezone + " (UTC" + .utc_offset + ")",
         "🌐 ISP:            " + .isp'
     else
-        echo "IP-Adresse: $(curl -s --connect-timeout 10 http://icanhazip.com)"
+        echo "IP-Adresse: $(secure_curl "https://icanhazip.com")"
     fi
     echo ""
-    
-    # Tor-Verbindung (falls aktiv)
-    if pgrep -x "tor" > /dev/null 2>&1 || netstat -an | grep -E "\.9050.*LISTEN" > /dev/null 2>&1; then
+
+    if is_tor_running; then
         echo -e "${BLUE}[2] Tor-Verbindung${NC}"
         echo "─────────────────────"
-        
-        # Prüfe ob ProxyChains funktioniert
-        local tor_test=$(proxychains4 -q curl -s --connect-timeout 10 https://check.torproject.org/api/ip 2>/dev/null | jq -r '.IsTor' 2>/dev/null)
-        
+
+        local tor_test
+        tor_test=$(proxychains4 -q curl -4 -s --connect-timeout 10 https://check.torproject.org/api/ip 2>/dev/null | jq -r '.IsTor' 2>/dev/null)
+
         if [[ "$tor_test" == "true" ]]; then
             if command -v jq &> /dev/null; then
-                proxychains4 -q curl -s --connect-timeout 10 https://ipapi.co/json/ 2>/dev/null | jq -r '
+                proxychains4 -q curl -4 -s --connect-timeout 10 https://ipapi.co/json/ 2>/dev/null | jq -r '
                 "🧅 Tor-IP:         " + .ip,
                 "🏙️  Stadt:          " + .city,
                 "🗺️  Region:         " + .region,
@@ -710,7 +753,7 @@ show_ip_info() {
                 "🕐 Zeitzone:       " + .timezone + " (UTC" + .utc_offset + ")",
                 "🌐 ISP:            " + .isp'
             else
-                echo "Tor-IP: $(proxychains4 -q curl -s --connect-timeout 10 http://icanhazip.com 2>/dev/null)"
+                echo "Tor-IP: $(proxychains4 -q curl -4 -s --connect-timeout 10 https://icanhazip.com 2>/dev/null)"
             fi
             echo ""
             echo -e "${GREEN}✅ Tor-Anonymisierung aktiv${NC}"
@@ -721,20 +764,20 @@ show_ip_info() {
         echo -e "${YELLOW}ℹ️  Tor ist nicht aktiv${NC}"
         echo "   Starte Tor mit: $0 tor start"
     fi
-    
+
     echo ""
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo -e "${BLUE}💡 Tipps:${NC}"
     echo "• Für maximale Anonymität: Verwende den Tor Browser"
-    echo "• Transparentes Tor: ./xxxos.sh tor trans-on + source /tmp/tor_shell_config"
+    echo "• Transparentes Tor: ./nulltrace.sh tor trans-on + source /tmp/tor_shell_config"
     echo "• Privacy-Status prüfen: $0 status"
 }
 
-# Vereinfachtes Hauptmenü anzeigen
+# Interaktives Hauptmenü
 show_interactive_menu() {
     show_banner
     echo -e "${BLUE}  ╔══════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${BLUE}  ║                    🔧 xxxOS HAUPTMENÜ 🔧                    ║${NC}"
+    echo -e "${BLUE}  ║                 🔧 nulltrace HAUPTMENÜ 🔧                   ║${NC}"
     echo -e "${BLUE}  ╚══════════════════════════════════════════════════════════════╝${NC}"
     echo ""
     echo -e "${GREEN}🔥 Hauptfunktionen:${NC}"
@@ -749,16 +792,17 @@ show_interactive_menu() {
     echo -e "  ${YELLOW}5) ipinfo${NC}            📍 Detaillierte IP-Informationen"
     echo -e "  ${YELLOW}6) mac${NC}               🔀 MAC-Adresse ändern"
     echo -e "  ${YELLOW}7) tor${NC}               🧅 Tor-Kontrolle (erweitert)"
+    echo -e "  ${YELLOW}8) killswitch${NC}        🛡️  Kill-Switch Steuerung"
     echo ""
     echo -e "  ${YELLOW}0) exit${NC}              👋 Beenden"
     echo ""
 }
 
-# Vereinfachte Eingabeverarbeitung
+# Eingabeverarbeitung
 handle_interactive_input() {
     local choice="$1"
-    local param="$2"
-    
+    local param="${2:-}"
+
     case "$choice" in
         1|privacy-on)
             handle_privacy "on"
@@ -784,7 +828,7 @@ handle_interactive_input() {
                 echo -e "${BLUE}Tor-Aktionen:${NC}"
                 echo ""
                 echo "  start      - Nur Tor-Service starten"
-                echo "  stop       - Nur Tor-Service stoppen"  
+                echo "  stop       - Nur Tor-Service stoppen"
                 echo "  status     - Status anzeigen"
                 echo "  full-on    - 🔒 System-weites Tor"
                 echo "  full-off   - 🌐 System-weites Tor aus"
@@ -796,6 +840,19 @@ handle_interactive_input() {
             fi
             handle_tor "$param"
             ;;
+        8|killswitch)
+            if [ -z "$param" ]; then
+                echo ""
+                echo -e "${BLUE}Kill-Switch Aktionen:${NC}"
+                echo ""
+                echo "  on     - Kill-Switch aktivieren"
+                echo "  off    - Kill-Switch deaktivieren"
+                echo "  status - Status anzeigen"
+                echo ""
+                read -p "Welche Aktion? (on/off/status): " param
+            fi
+            "$KILLSWITCH_SCRIPT" "$param"
+            ;;
         0|exit)
             echo ""
             echo -e "${GREEN}👋 Auf Wiedersehen!${NC}"
@@ -803,7 +860,7 @@ handle_interactive_input() {
             ;;
         *)
             echo -e "${RED}❌ Ungültige Eingabe: $choice${NC}"
-            echo "Bitte Nummer (0-7) oder Funktionsname eingeben."
+            echo "Bitte Nummer (0-8) oder Funktionsname eingeben."
             return 1
             ;;
     esac
@@ -811,8 +868,8 @@ handle_interactive_input() {
 
 # VPN-Funktionen
 handle_vpn() {
-    local action="$1"
-    
+    local action="${1:-}"
+
     if [ -z "$action" ]; then
         echo ""
         echo -e "${BLUE}🌍 VPN-Funktionen:${NC}"
@@ -824,7 +881,7 @@ handle_vpn() {
         echo ""
         read -p "Welche VPN-Funktion möchtest du? (1-5 oder Name): " action
     fi
-    
+
     case "$action" in
         1|menu|"")
             "$VPN_SCRIPT" menu
@@ -842,11 +899,11 @@ handle_vpn() {
             "$VPN_SCRIPT" reset
             ;;
         connect)
-            shift
+            shift 2>/dev/null
             "$VPN_SCRIPT" connect "$@"
             ;;
         disconnect)
-            shift
+            shift 2>/dev/null
             "$VPN_SCRIPT" disconnect "$@"
             ;;
         *)
@@ -857,45 +914,40 @@ handle_vpn() {
     esac
 }
 
-
-# StatusBar automatisch starten falls Plugin installiert
+# StatusBar automatisch starten
 auto_start_statusbar() {
-    # Launcher im Hintergrund ausführen
     "$SCRIPT_DIR/scripts/statusbar_launcher.sh" 2>/dev/null &
 }
 
 # Hauptprogramm
 main() {
     check_dependencies
-    
-    # StatusBar automatisch starten bei xxxOS-Start
+
     auto_start_statusbar
-    
+
     if [ $# -eq 0 ]; then
         while true; do
             show_interactive_menu
             echo ""
-            read -p "Funktion wählen (1-7, 0 oder Name): " user_choice
-            
-            # Parse Eingabe (z.B. "3 ultra" oder "privacy ultra")
+            read -p "Funktion wählen (0-8 oder Name): " user_choice
+
             choice=$(echo "$user_choice" | awk '{print $1}')
             param=$(echo "$user_choice" | awk '{print $2}')
-            
-            # Exit-Befehle behandeln
+
             if [[ "$choice" == "0" || "$choice" == "exit" || "$choice" == "quit" ]]; then
                 echo "Auf Wiedersehen!"
                 exit 0
             fi
-            
+
             echo ""
             handle_interactive_input "$choice" "$param"
-            
+
             echo ""
             echo "Drücke Enter um zum Hauptmenü zurückzukehren..."
             read -r
         done
     fi
-    
+
     case "$1" in
         privacy-on)
             handle_privacy "on"
@@ -917,20 +969,23 @@ main() {
             handle_mac
             ;;
         tor)
-            handle_tor "$2"
+            handle_tor "${2:-}"
             ;;
         proxychains)
             "$PROXYCHAINS_SCRIPT" install
             ;;
         security)
-            handle_security "$2"
+            handle_security "${2:-}"
             ;;
         vpn)
-            handle_vpn "$2"
+            handle_vpn "${2:-}"
+            ;;
+        killswitch)
+            "$KILLSWITCH_SCRIPT" "${2:-status}"
             ;;
         # Legacy support
         privacy)
-            if [ "$2" = "on" ] || [ "$2" = "off" ]; then
+            if [ "${2:-}" = "on" ] || [ "${2:-}" = "off" ]; then
                 handle_privacy "$2"
             else
                 echo -e "${YELLOW}💡 Tipp: Verwende 'privacy-on' oder 'privacy-off'${NC}"
@@ -945,5 +1000,4 @@ main() {
     esac
 }
 
-# Skript ausführen
 main "$@"

@@ -1,14 +1,13 @@
 #!/bin/bash
 
-# ProxyChains Setup für xxxOS
+# nulltrace ProxyChains Setup
 # Konfiguriert ProxyChains für Tor-Nutzung
 
-# ProxyChains Config Pfad (Homebrew auf Apple Silicon)
-if [ -d "/opt/homebrew" ]; then
-    PROXYCHAINS_CONFIG="/opt/homebrew/etc/proxychains.conf"
-else
-    PROXYCHAINS_CONFIG="/usr/local/etc/proxychains.conf"
-fi
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/lib/utils.sh"
+
+HOMEBREW_PREFIX="$(detect_homebrew_prefix)"
+PROXYCHAINS_CONFIG="$HOMEBREW_PREFIX/etc/proxychains.conf"
 
 # ProxyChains installieren falls nicht vorhanden
 install_proxychains() {
@@ -23,15 +22,13 @@ install_proxychains() {
 # ProxyChains für Tor konfigurieren
 configure_proxychains() {
     echo "⚙️  Konfiguriere ProxyChains für Tor..."
-    
-    # Backup erstellen falls Datei existiert
+
     if [ -f "$PROXYCHAINS_CONFIG" ]; then
         cp "$PROXYCHAINS_CONFIG" "$PROXYCHAINS_CONFIG.backup.$(date +%Y%m%d_%H%M%S)" 2>/dev/null || true
     fi
-    
-    # Konfiguration erstellen
+
     tee "$PROXYCHAINS_CONFIG" > /dev/null << 'EOF'
-# ProxyChains-4 Konfiguration für xxxOS
+# ProxyChains-4 Konfiguration für nulltrace
 # Optimiert für Tor-Nutzung mit IPv6-Schutz
 
 # Quiet mode (weniger Output)
@@ -44,7 +41,6 @@ dynamic_chain
 proxy_dns
 
 # IPv6 komplett deaktivieren für bessere Tor-Kompatibilität
-# Verhindert IPv6-Leaks die ProxyChains umgehen
 localnet 127.0.0.0/255.0.0.0
 localnet 10.0.0.0/255.0.0.0
 localnet 172.16.0.0/255.240.0.0
@@ -65,10 +61,9 @@ EOF
 # Shell-Aliase einrichten
 setup_aliases() {
     echo "🔧 Richte Shell-Aliase ein..."
-    
-    # Aliase definieren
+
     ALIASES='
-# xxxOS ProxyChains Aliase
+# nulltrace ProxyChains Aliase
 alias pc="proxychains4"
 alias pccurl="proxychains4 curl"
 alias pcwget="proxychains4 wget"
@@ -78,34 +73,29 @@ alias pcssh="proxychains4 ssh"
 alias pcping="proxychains4 ping"
 
 # IP-Check Aliase - IPv4 erzwingen
-alias checkip="curl -4 ipinfo.io"
-alias torip="proxychains4 curl -4 ipinfo.io"
+alias checkip="curl -4 https://ipinfo.io"
+alias torip="proxychains4 curl -4 https://ipinfo.io"
 alias torcheck="proxychains4 curl -4 https://check.torproject.org/api/ip"
 
-# Tor-Terminal - ALLE Befehle über Tor  
+# Tor-Terminal - ALLE Befehle über Tor
 alias torshell="PROXYCHAINS_QUIET_MODE=1 proxychains4 zsh"
 '
-    
-    # Für Zsh
-    if [ -f ~/.zshrc ]; then
-        if ! grep -q "xxxOS ProxyChains Aliase" ~/.zshrc; then
-            echo "$ALIASES" >> ~/.zshrc
-            echo "✅ Aliase zu ~/.zshrc hinzugefügt"
-        else
-            echo "ℹ️  Aliase bereits in ~/.zshrc vorhanden"
+
+    for rcfile in "$HOME/.zshrc" "$HOME/.bash_profile"; do
+        if [ -f "$rcfile" ]; then
+            if ! grep -q "nulltrace ProxyChains Aliase" "$rcfile"; then
+                # Entferne alte xxxOS Aliase falls vorhanden
+                if grep -q "xxxOS ProxyChains Aliase" "$rcfile"; then
+                    sed -i '' '/# xxxOS ProxyChains Aliase/,/^$/d' "$rcfile"
+                fi
+                echo "$ALIASES" >> "$rcfile"
+                echo "✅ Aliase zu $rcfile hinzugefügt"
+            else
+                echo "ℹ️  Aliase bereits in $rcfile vorhanden"
+            fi
         fi
-    fi
-    
-    # Für Bash
-    if [ -f ~/.bash_profile ]; then
-        if ! grep -q "xxxOS ProxyChains Aliase" ~/.bash_profile; then
-            echo "$ALIASES" >> ~/.bash_profile
-            echo "✅ Aliase zu ~/.bash_profile hinzugefügt"
-        else
-            echo "ℹ️  Aliase bereits in ~/.bash_profile vorhanden"
-        fi
-    fi
-    
+    done
+
     echo ""
     echo "📝 Neue Aliase:"
     echo "  pc         - ProxyChains Kurzform"
@@ -122,20 +112,18 @@ alias torshell="PROXYCHAINS_QUIET_MODE=1 proxychains4 zsh"
 test_proxychains() {
     echo ""
     echo "🧪 Teste ProxyChains..."
-    
-    # Normale IP
+
     echo "Deine normale IP:"
-    curl -s ipinfo.io | jq -r '.ip' 2>/dev/null || curl -s ipinfo.io | grep -o '"ip":"[^"]*' | cut -d'"' -f4
-    
-    # Tor IP
+    secure_curl "https://ipinfo.io" | jq -r '.ip' 2>/dev/null || secure_curl "https://icanhazip.com"
+
     echo ""
     echo "Deine Tor IP:"
-    proxychains4 -q curl -s ipinfo.io | jq -r '.ip' 2>/dev/null || proxychains4 -q curl -s ipinfo.io | grep -o '"ip":"[^"]*' | cut -d'"' -f4
-    
-    # Tor-Status
+    proxychains4 -q curl -4 -s https://ipinfo.io | jq -r '.ip' 2>/dev/null || proxychains4 -q curl -4 -s https://icanhazip.com
+
     echo ""
     echo "Tor-Status:"
-    local tor_status=$(proxychains4 -q curl -s https://check.torproject.org/api/ip | jq -r '.IsTor' 2>/dev/null)
+    local tor_status
+    tor_status=$(proxychains4 -q curl -4 -s https://check.torproject.org/api/ip | jq -r '.IsTor' 2>/dev/null)
     if [ "$tor_status" = "true" ]; then
         echo "✅ Du bist über Tor verbunden!"
     else
@@ -145,7 +133,7 @@ test_proxychains() {
 
 # Hauptfunktion
 main() {
-    case "$1" in
+    case "${1:-}" in
         install)
             install_proxychains
             configure_proxychains
@@ -162,7 +150,7 @@ main() {
             test_proxychains
             ;;
         *)
-            echo "🔗 ProxyChains Setup für xxxOS"
+            echo "🔗 ProxyChains Setup für nulltrace"
             echo "==============================="
             echo ""
             echo "Usage: $0 {install|config|aliases|test}"

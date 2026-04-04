@@ -1,27 +1,31 @@
 #!/bin/bash
 
-# xxxOS Sudoers Setup
-# Dieses Script richtet passwortlose sudo-Befehle für xxxOS ein
+# nulltrace Sudoers Setup
+# Dieses Script richtet passwortlose sudo-Befehle für nulltrace ein
 
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[0;33m'
-BLUE='\033[0;34m'
-NC='\033[0m'
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/lib/utils.sh" 2>/dev/null || {
+    RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; BLUE='\033[0;34m'; NC='\033[0m'
+}
 
 echo -e "${BLUE}╔════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${BLUE}║              xxxOS Sudo-Konfiguration                      ║${NC}"
+echo -e "${BLUE}║            nulltrace Sudo-Konfiguration                    ║${NC}"
 echo -e "${BLUE}╚════════════════════════════════════════════════════════════╝${NC}"
 echo ""
-echo -e "${YELLOW}Dieses Script richtet passwortlose sudo-Befehle für xxxOS ein.${NC}"
+echo -e "${YELLOW}Dieses Script richtet passwortlose sudo-Befehle für nulltrace ein.${NC}"
 echo -e "${YELLOW}Sie müssen Ihr Passwort nur einmal eingeben.${NC}"
 echo ""
 
-# Erstelle sudoers.d Datei für xxxOS
-SUDOERS_FILE="/etc/sudoers.d/xxxos"
+# Alte xxxOS sudoers entfernen falls vorhanden
+if [ -f "/etc/sudoers.d/xxxos" ]; then
+    echo -e "${YELLOW}Entferne alte xxxOS sudoers-Konfiguration...${NC}"
+    sudo rm -f /etc/sudoers.d/xxxos
+fi
+
+SUDOERS_FILE="/etc/sudoers.d/nulltrace"
 SUDOERS_CONTENT=$(cat << 'EOF'
-# xxxOS Password-less Commands
-# Allows xxxOS privacy commands without password prompt
+# nulltrace Password-less Commands
+# Allows nulltrace privacy commands without password prompt
 
 # System identification and hostname
 %admin ALL=(ALL) NOPASSWD: /usr/sbin/scutil --set ComputerName *
@@ -59,12 +63,13 @@ SUDOERS_CONTENT=$(cat << 'EOF'
 
 # Hosts file management
 %admin ALL=(ALL) NOPASSWD: /bin/cp /etc/hosts *
-%admin ALL=(ALL) NOPASSWD: /bin/cp /etc/hosts.xxxos.backup /etc/hosts
+%admin ALL=(ALL) NOPASSWD: /bin/cp /etc/hosts.nulltrace.backup /etc/hosts
 %admin ALL=(ALL) NOPASSWD: /usr/bin/tee -a /etc/hosts
 %admin ALL=(ALL) NOPASSWD: /usr/bin/tee /etc/hosts
 %admin ALL=(ALL) NOPASSWD: /usr/bin/sed -i.bak * /etc/hosts
 %admin ALL=(ALL) NOPASSWD: /usr/bin/sed -i * /etc/hosts
-%admin ALL=(ALL) NOPASSWD: /bin/rm -f /etc/hosts.xxxos.backup
+%admin ALL=(ALL) NOPASSWD: /bin/rm -f /etc/hosts.nulltrace.backup
+%admin ALL=(ALL) NOPASSWD: /bin/mv /etc/hosts.xxxos.backup /etc/hosts.nulltrace.backup
 
 # Firewall management
 %admin ALL=(ALL) NOPASSWD: /usr/libexec/ApplicationFirewall/socketfilterfw *
@@ -74,8 +79,11 @@ SUDOERS_CONTENT=$(cat << 'EOF'
 
 # Configuration file management
 %admin ALL=(ALL) NOPASSWD: /usr/bin/tee /usr/local/etc/proxychains.conf
+%admin ALL=(ALL) NOPASSWD: /usr/bin/tee /opt/homebrew/etc/proxychains.conf
 %admin ALL=(ALL) NOPASSWD: /bin/cp /usr/local/etc/proxychains.conf *
-%admin ALL=(ALL) NOPASSWD: /bin/chmod 440 /etc/sudoers.d/xxxos
+%admin ALL=(ALL) NOPASSWD: /bin/cp /opt/homebrew/etc/proxychains.conf *
+%admin ALL=(ALL) NOPASSWD: /bin/chmod 440 /etc/sudoers.d/nulltrace
+%admin ALL=(ALL) NOPASSWD: /bin/rm -f /etc/sudoers.d/nulltrace
 %admin ALL=(ALL) NOPASSWD: /bin/rm -f /etc/sudoers.d/xxxos
 %admin ALL=(ALL) NOPASSWD: /bin/rm -f /Library/Preferences/SystemConfiguration/*.plist
 %admin ALL=(ALL) NOPASSWD: /bin/mv /etc/pam.d/sudo.backup /etc/pam.d/sudo
@@ -86,7 +94,7 @@ SUDOERS_CONTENT=$(cat << 'EOF'
 %admin ALL=(ALL) NOPASSWD: /usr/sbin/installer -pkg * -target /
 
 # Validation commands
-%admin ALL=(ALL) NOPASSWD: /usr/sbin/visudo -c -f /etc/sudoers.d/xxxos
+%admin ALL=(ALL) NOPASSWD: /usr/sbin/visudo -c -f /etc/sudoers.d/nulltrace
 
 EOF
 )
@@ -94,10 +102,8 @@ EOF
 echo -e "${BLUE}Schreibe sudoers-Konfiguration...${NC}"
 echo "$SUDOERS_CONTENT" | sudo tee "$SUDOERS_FILE" > /dev/null
 
-# Setze korrekte Berechtigungen
 sudo chmod 440 "$SUDOERS_FILE"
 
-# Validiere sudoers-Datei
 echo -e "${BLUE}Validiere Konfiguration...${NC}"
 if sudo visudo -c -f "$SUDOERS_FILE"; then
     echo -e "${GREEN}✅ Sudo-Konfiguration erfolgreich installiert!${NC}"
@@ -113,7 +119,6 @@ if sudo visudo -c -f "$SUDOERS_FILE"; then
     echo "  • Firewall-Einstellungen ändern"
     echo "  • Packet Filter (pfctl) steuern"
     echo "  • ProxyChains konfigurieren"
-    echo "  • Touch ID für sudo konfigurieren"
     echo ""
     echo -e "${YELLOW}⚠️  Hinweis: Diese Konfiguration erhöht den Komfort, reduziert aber die Sicherheit.${NC}"
     echo -e "${YELLOW}   Entfernen mit: sudo rm $SUDOERS_FILE${NC}"

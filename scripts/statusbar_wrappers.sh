@@ -1,18 +1,15 @@
 #!/bin/bash
 
-# Wrapper scripts für StatusBar - halten Terminal offen
+# nulltrace StatusBar-Wrapper - halten Terminal offen
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-XXXOS_DIR="$(dirname "$SCRIPT_DIR")"
+NULLTRACE_DIR="$(dirname "$SCRIPT_DIR")"
 
 # Globaler Sudo-Cache vor allen Aktionen
 start_sudo_cache() {
-    # IMMER erst prüfen ob sudoers-Konfiguration funktioniert
     if sudo -n dscacheutil -flushcache >/dev/null 2>&1; then
-        # Sudoers funktioniert - NIEMALS Cache-Helper verwenden
         return 0
     fi
-    
-    # Nur wenn sudoers nicht funktioniert, Cache-Helper verwenden
+
     if ! sudo -n true 2>/dev/null; then
         "$SCRIPT_DIR/sudo_cache_helper.sh" start
     fi
@@ -25,54 +22,51 @@ keep_terminal_open() {
     read -r
 }
 
-case "$1" in
+case "${1:-}" in
     "status")
-        "$XXXOS_DIR/xxxos.sh" status
+        "$NULLTRACE_DIR/nulltrace.sh" status
         keep_terminal_open
         ;;
     "privacy-on")
-        # Keine Cache-Helper - direkt ausführen
-        "$XXXOS_DIR/xxxos.sh" privacy-on
+        "$NULLTRACE_DIR/nulltrace.sh" privacy-on
         keep_terminal_open
         ;;
     "privacy-off")
-        # Keine Cache-Helper - direkt ausführen
-        "$XXXOS_DIR/xxxos.sh" privacy-off
+        "$NULLTRACE_DIR/nulltrace.sh" privacy-off
         keep_terminal_open
         ;;
     "privacy-ultra")
         echo "⚠️  Ultra Privacy Mode wurde vereinfacht."
         echo "Verwende stattdessen: privacy-on"
         echo ""
-        # Keine Cache-Helper - direkt ausführen
-        "$XXXOS_DIR/xxxos.sh" privacy-on
+        "$NULLTRACE_DIR/nulltrace.sh" privacy-on
         keep_terminal_open
         ;;
     "tor-status")
-        "$XXXOS_DIR/scripts/tor_control.sh" status
+        "$NULLTRACE_DIR/scripts/tor_control.sh" status
         keep_terminal_open
         ;;
     "tor-transparent-status")
-        "$XXXOS_DIR/scripts/tor_transparent.sh" status
+        "$NULLTRACE_DIR/scripts/tor_transparent.sh" status
         keep_terminal_open
         ;;
     "ipinfo")
-        "$XXXOS_DIR/xxxos.sh" ipinfo
+        "$NULLTRACE_DIR/nulltrace.sh" ipinfo
         keep_terminal_open
         ;;
     "security-full")
-        "$XXXOS_DIR/xxxos.sh" security full
+        "$NULLTRACE_DIR/nulltrace.sh" security full
         keep_terminal_open
         ;;
-    "xxxos")
-        cd "$XXXOS_DIR" && ./xxxos.sh
+    "nulltrace")
+        cd "$NULLTRACE_DIR" && ./nulltrace.sh
         ;;
     "tor-terminal")
         echo "🔒 Tor-Terminal Konfiguration"
         echo "=========================="
         echo ""
         echo "Nach transparentem Tor aktivieren:"
-        echo "  ./xxxos.sh tor trans-on"
+        echo "  ./nulltrace.sh tor trans-on"
         echo ""
         echo "Dann in neuer Terminal-Session:"
         echo "  source /tmp/tor_shell_config"
@@ -84,8 +78,8 @@ case "$1" in
         keep_terminal_open
         ;;
     *)
-        echo "Usage: $0 [status|privacy-on|privacy-off|tor-status|ipinfo|xxxos|tor-terminal]"
+        echo "Usage: $0 [status|privacy-on|privacy-off|tor-status|ipinfo|nulltrace|tor-terminal]"
         echo ""
-        echo "Vereinfachte xxxOS StatusBar-Wrapper"
+        echo "nulltrace StatusBar-Wrapper"
         ;;
 esac

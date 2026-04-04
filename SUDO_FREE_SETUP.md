@@ -1,12 +1,12 @@
-# xxxOS Sudo-Free Setup
+# nulltrace Sudo-Free Setup
 
-Diese Anleitung erklärt, wie du xxxOS ohne ständige Passwort-Eingaben verwenden kannst.
+Diese Anleitung erklärt, wie du nulltrace ohne ständige Passwort-Eingaben verwenden kannst.
 
-## 🚀 Schnellstart
+## Schnellstart
 
 1. **Installiere die sudoers-Konfiguration:**
    ```bash
-   ./scripts/xxxos_sudoers_setup.sh
+   ./scripts/nulltrace_sudoers_setup.sh
    ```
    (Du musst nur EINMAL dein Passwort eingeben)
 
@@ -15,9 +15,9 @@ Diese Anleitung erklärt, wie du xxxOS ohne ständige Passwort-Eingaben verwende
    ./test_setup.sh
    ```
 
-3. **Fertig!** Ab jetzt funktionieren alle xxxOS-Befehle ohne Passwort.
+3. **Fertig!** Ab jetzt funktionieren alle nulltrace-Befehle ohne Passwort.
 
-## 🔄 Automatischer SwiftBar-Neustart
+## Automatischer SwiftBar-Neustart
 
 SwiftBar wird automatisch neugestartet nach:
 - Tor Start/Stop
@@ -26,7 +26,7 @@ SwiftBar wird automatisch neugestartet nach:
 - IPv6-Änderungen
 - Transparentem Tor
 
-## 🛡️ Was wird installiert?
+## Was wird installiert?
 
 Die sudoers-Konfiguration erlaubt passwortlose Ausführung für:
 - MAC-Adresse ändern
@@ -36,16 +36,17 @@ Die sudoers-Konfiguration erlaubt passwortlose Ausführung für:
 - Tor-Service steuern
 - SwiftBar neustarten
 - Firewall-Einstellungen
+- Packet Filter (pfctl) steuern
 - ProxyChains konfigurieren
 
-## 🗑️ Deinstallation
+## Deinstallation
 
 Falls du die passwortlose Konfiguration entfernen möchtest:
 ```bash
-sudo rm /etc/sudoers.d/xxxos
+sudo rm /etc/sudoers.d/nulltrace
 ```
 
-## ⚠️ Sicherheitshinweis
+## Sicherheitshinweis
 
 Diese Konfiguration erhöht den Komfort, reduziert aber die Sicherheit.
 Verwende sie nur auf vertrauenswürdigen Systemen.
