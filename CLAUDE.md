@@ -131,7 +131,9 @@ Fallback mode: `tor_control.sh full-on` starts Tor as current user, sets system 
 - **MAC spoofing may fail silently**: `ifconfig ioctl` errors are non-fatal. The MAC address change relies on Wi-Fi off/on cycling which may not work on all hardware.
 - **Homebrew Tor has no TransPort**: Transparent TCP interception via pf rdr rules is impossible with stock Homebrew Tor. The enforcement mode uses SOCKS proxy + pf killswitch instead.
 - **DNS in transparent mode**: DNS goes to Cloudflare 1.1.1.1 (allowed by pf). Terminal tools using `socks5-hostname` resolve DNS through Tor. Browser DNS depends on SOCKS proxy settings.
-- **ipapi.co rate limits**: The `myip` alias can fail with non-JSON responses. Always handle jq parse errors gracefully.
+- **`new-identity` and the `_nulltrace_tor` user**: `pkill -HUP tor` can't signal Tor when it runs as `_nulltrace_tor`. Use `sudo pkill -HUP -u _nulltrace_tor tor` as fallback. The function in `tor_control.sh` tries both.
+- **Always use `--socks5-hostname`, never `--socks5`**: With `--socks5`, curl resolves DNS locally — which pf blocks in enforcement mode. `--socks5-hostname` sends the hostname to Tor for resolution.
+- **ipapi.co rate limits**: The `myip` function can fail with non-JSON responses. Always handle jq parse errors gracefully.
 
 ## Security Constraints
 
