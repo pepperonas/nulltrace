@@ -19,10 +19,10 @@ HOMEBREW_PREFIX="$(detect_homebrew_prefix)"
 WIFI_IFACE="$(get_effective_wifi_interface)"
 WIFI_SERVICE="$(get_effective_wifi_service)"
 TOR_DATA_DIR="/var/lib/nulltrace-tor"
-TOR_CONFIG="$NULLTRACE_RUNTIME_DIR/torrc.transparent"
+TOR_CONFIG="$TOR_DATA_DIR/torrc"
 PF_RULES="$NULLTRACE_RUNTIME_DIR/pf_transparent.conf"
 PF_BACKUP="$NULLTRACE_RUNTIME_DIR/pf_backup.conf"
-TOR_PID_FILE="$NULLTRACE_RUNTIME_DIR/tor_transparent.pid"
+TOR_PID_FILE="$TOR_DATA_DIR/tor.pid"
 
 # ─── Voraussetzungen ─────────────────────────────────────────────────────────
 
@@ -46,20 +46,27 @@ check_tor_binary() {
 
 setup_tor_user() {
     if id "$TOR_USER" &>/dev/null; then
+        log_ok "System-User '$TOR_USER' existiert bereits"
         return 0
     fi
 
     log_info "Erstelle System-User '$TOR_USER' (UID $TOR_UID)..."
 
+    # Freie GID finden (399 kann belegt sein)
+    local gid="$TOR_GID"
+    if dscl . -list /Groups PrimaryGroupID 2>/dev/null | awk '{print $2}' | grep -q "^${gid}$"; then
+        gid=398
+    fi
+
     # Gruppe erstellen
-    dscl . -create /Groups/$TOR_USER
-    dscl . -create /Groups/$TOR_USER PrimaryGroupID "$TOR_GID"
+    dscl . -create /Groups/$TOR_USER 2>/dev/null || true
+    dscl . -create /Groups/$TOR_USER PrimaryGroupID "$gid"
     dscl . -create /Groups/$TOR_USER RealName "nulltrace Tor Daemon"
 
     # User erstellen
     dscl . -create /Users/$TOR_USER
     dscl . -create /Users/$TOR_USER UniqueID "$TOR_UID"
-    dscl . -create /Users/$TOR_USER PrimaryGroupID "$TOR_GID"
+    dscl . -create /Users/$TOR_USER PrimaryGroupID "$gid"
     dscl . -create /Users/$TOR_USER UserShell /usr/bin/false
     dscl . -create /Users/$TOR_USER RealName "nulltrace Tor Daemon"
     dscl . -create /Users/$TOR_USER NFSHomeDirectory /var/empty
@@ -67,19 +74,19 @@ setup_tor_user() {
     # User verstecken (nicht im Login-Screen anzeigen)
     dscl . -create /Users/$TOR_USER IsHidden 1
 
-    log_ok "System-User '$TOR_USER' erstellt"
+    log_ok "System-User '$TOR_USER' erstellt (UID $TOR_UID, GID $gid)"
 }
 
 setup_tor_dirs() {
     mkdir -p "$TOR_DATA_DIR"
-    chown "$TOR_USER:$TOR_USER" "$TOR_DATA_DIR"
+    chown "$TOR_USER" "$TOR_DATA_DIR"
     chmod 700 "$TOR_DATA_DIR"
 }
 
 # ─── Tor-Konfiguration ──────────────────────────────────────────────────────
 
 write_tor_config() {
-    ensure_runtime_dir
+    setup_tor_dirs
 
     cat > "$TOR_CONFIG" << EOF
 # nulltrace Transparent Tor Configuration
@@ -91,6 +98,7 @@ VirtualAddrNetworkIPv4 10.192.0.0/10
 
 DataDirectory $TOR_DATA_DIR
 Log notice file $TOR_DATA_DIR/tor.log
+PidFile $TOR_PID_FILE
 
 # Sicherheit
 ClientUseIPv6 0
@@ -99,13 +107,14 @@ SafeSocks 1
 EOF
 
     chown "$TOR_USER" "$TOR_CONFIG"
-    log_ok "Tor-Konfiguration erstellt"
+    chmod 600 "$TOR_CONFIG"
+    log_ok "Tor-Konfiguration erstellt ($TOR_CONFIG)"
 }
 
 # ─── pf-Regeln ───────────────────────────────────────────────────────────────
 
 write_pf_rules() {
-    ensure_runtime_dir
+    ensure_runtime_dir 2>/dev/null || mkdir -p "$NULLTRACE_RUNTIME_DIR" 2>/dev/null || true
 
     cat > "$PF_RULES" << EOF
 # nulltrace Transparent Tor Routing
@@ -177,7 +186,7 @@ start_transparent_tor() {
 
     # 4. Tor als _nulltrace_tor starten
     echo -e "${BLUE}[4/6] Tor als User '$TOR_USER' starten...${NC}"
-    sudo -u "$TOR_USER" "$HOMEBREW_PREFIX/bin/tor" -f "$TOR_CONFIG" --RunAsDaemon 1 --PidFile "$TOR_PID_FILE"
+    sudo -u "$TOR_USER" "$HOMEBREW_PREFIX/bin/tor" -f "$TOR_CONFIG" --RunAsDaemon 1
 
     # Warten auf Bootstrap
     local retry=0

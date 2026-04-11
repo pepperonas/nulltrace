@@ -233,7 +233,7 @@ get_config() {
     local key="$1"
     local default="$2"
     local var="NULLTRACE_$key"
-    local val="${!var}"
+    local val="${!var:-}"
     echo "${val:-$default}"
 }
 

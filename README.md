@@ -147,11 +147,40 @@ sudo ./nulltrace.sh privacy-off
 Add to your `~/.zshrc` or `~/.bashrc`:
 
 ```bash
+# Core
 alias nt='/path/to/nulltrace.sh'
 alias nts='/path/to/nulltrace.sh status'
-alias nton='sudo /path/to/nulltrace.sh privacy-on'
-alias ntoff='sudo /path/to/nulltrace.sh privacy-off'
+alias nton='/path/to/nulltrace.sh privacy-on'
+alias ntoff='/path/to/nulltrace.sh privacy-off'
+
+# IP & Location — auto-detects Tor and routes accordingly
+myip() {
+  local flags=()
+  pgrep -x tor >/dev/null 2>&1 && flags=(--socks5 localhost:9050) && echo "🧅 Tor aktiv"
+  curl -s "${flags[@]}" https://ipapi.co/json/ \
+    | jq -r '"IP:        " + .ip,
+             "Stadt:     " + .city,
+             "Region:    " + .region,
+             "Land:      " + .country_name,
+             "ISP:       " + .org,
+             "Koordinaten: " + (.latitude|tostring) + ", " + (.longitude|tostring)'
+}
+
+# New identity — requests a new Tor exit node and shows new location
+alias newip='/path/to/nulltrace.sh tor new-identity \
+  && sleep 2 && echo "───────────────────────────" && echo "Neuer Standort:" \
+  && curl -s --socks5 localhost:9050 https://ipapi.co/json/ \
+     | jq -r "\"IP:        \" + .ip, \"Stadt:     \" + .city, \"Land:      \" + .country_name"'
 ```
+
+| Alias | Requires Tor | What it does |
+|-------|-------------|--------------|
+| `nt` | No | Interactive menu |
+| `nts` | No | Privacy status dashboard |
+| `nton` | — | Activate all privacy features + Tor |
+| `ntoff` | — | Restore normal settings |
+| `myip` | Auto-detect | Show current IP & location (uses Tor if running) |
+| `newip` | Yes | Request new Tor exit node, show new location |
 
 ## Usage
 
@@ -382,6 +411,45 @@ Run `sudo ./scripts/tor_transparent.sh setup` to pre-create the user and directo
 - **No hardcoded paths** — Auto-detection for Homebrew prefix, Wi-Fi interface, services.
 - **Stale lock detection** — Sudo cache helper cleans up orphaned locks.
 - **Atomic pf updates** — Previous pf state backed up and restored on privacy-off.
+
+## Verifying Your Privacy
+
+Once `nton` is active, verify everything works:
+
+```bash
+# Check your visible IP and location (should show Tor exit node, not your real IP)
+$ myip
+🧅 Tor aktiv
+IP:        193.189.100.202
+Stadt:     Stockholm
+Region:    Stockholm County
+Land:      Sweden
+ISP:       KeFF Networks Ltd
+Koordinaten: 59.3287, 18.0717
+
+# Not happy with the location? Get a new one:
+$ newip
+✅ Neue IP-Adresse: 185.220.101.45
+📍 Neuer Standort: Amsterdam, Netherlands
+───────────────────────────
+Neuer Standort:
+IP:        185.220.101.45
+Stadt:     Amsterdam
+Land:      Netherlands
+
+# Verify DNS goes through Tor (should NOT show your ISP's DNS):
+$ dig +short whoami.akamai.net
+# Should return a Tor exit node IP, not your real IP
+
+# Verify with Tor Project's own check:
+$ curl -s https://check.torproject.org/api/ip | jq .
+{
+  "IsTor": true,
+  "IP": "193.189.100.202"
+}
+```
+
+If `myip` still shows your real IP after `nton`, run `ntoff` and then `nton` again.
 
 ## Troubleshooting
 
