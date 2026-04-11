@@ -446,22 +446,26 @@ handle_privacy() {
             "$PROXYCHAINS_SCRIPT" config
             echo ""
 
+            # Proxy-Env fuer aktuelle Shell laden
+            [ -f /tmp/nulltrace_proxy_env ] && source /tmp/nulltrace_proxy_env
+
             show_success "🔥 MAXIMALE PRIVATSPHÄRE AKTIVIERT!"
             echo ""
             echo -e "${GREEN}✓ Aktiviert:${NC}"
             echo "  • MAC-Adresse geändert (permanent)"
             echo "  • Hostname: $(get_config PRIVACY_HOSTNAME Lisa)"
             if [ "$tor_mode" = "transparent" ]; then
-                echo "  • Tor: ALLER Traffic über Tor (pf transparent)"
+                echo "  • Tor: SOCKS-Proxy + pf-Killswitch (non-Tor geblockt)"
             else
                 echo "  • Tor: System-SOCKS-Proxy"
             fi
-            echo "  • DNS: über Tor DNSPort"
             echo "  • Firewall: Stealth-Mode"
             echo "  • Tracking blockiert"
             echo "  • IPv6: Deaktiviert"
             echo ""
-            echo -e "${YELLOW}Hinweis:${NC} Nicht-Tor-Traffic wird von pf blockiert."
+            if [ "$tor_mode" = "transparent" ]; then
+                echo -e "${YELLOW}Fuer neue Terminals:${NC} source /tmp/nulltrace_proxy_env"
+            fi
             ;;
 
         off)

@@ -69,56 +69,61 @@ To restore everything:
 $ ./nulltrace.sh privacy-off
 ```
 
-## How Transparent Tor Works
+## How Tor Enforcement Works
 
-Unlike a simple SOCKS proxy (which only covers apps that respect macOS proxy settings), nulltrace uses **kernel-level packet filtering** to force _every_ TCP connection and DNS query through Tor — no exceptions.
+nulltrace uses a **SOCKS proxy + pf killswitch** architecture. Tor runs as a dedicated system user (`_nulltrace_tor`), and `pf` (macOS packet filter) blocks ALL outgoing traffic except from that user:
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                     macOS Network Stack                      │
-│                                                             │
-│  Any App ──TCP──► pf route-to lo0 ──► rdr ──► Tor TransPort│
-│                                        :9040                │
-│  Any App ──DNS──► pf route-to lo0 ──► rdr ──► Tor DNSPort  │
-│                                        :9053                │
-│                                                             │
-│  Tor (_nulltrace_tor) ──► pass out quick (direct to relays) │
-│                                                             │
-│  Everything else ──► block drop                             │
-└─────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│                      macOS Network Stack                      │
+│                                                              │
+│  Browser ────► System SOCKS Proxy ────► Tor (:9050) ──► Out  │
+│                                                              │
+│  Terminal ───► ALL_PROXY env var ──────► Tor (:9050) ──► Out  │
+│                                                              │
+│  Other App ──► No proxy? ──► pf block drop ──► BLOCKED       │
+│                                                              │
+│  Tor (_nulltrace_tor) ────────────────► pass out ────► Relays │
+│                                                              │
+│  IPv6 ───────────────────────────────► block drop ──► BLOCKED │
+└──────────────────────────────────────────────────────────────┘
 ```
+
+**Three layers of protection:**
+
+1. **System SOCKS proxy** — Browsers and macOS-aware apps route through Tor automatically
+2. **Proxy environment variables** (`ALL_PROXY`, `http_proxy`, `https_proxy`) — Terminal tools (curl, wget, git) route through Tor
+3. **pf killswitch** — Everything that doesn't use the proxy gets **blocked, not leaked**
 
 ### Why a Dedicated User?
 
-Tor needs to connect directly to relay nodes to build circuits. If those connections were also redirected through Tor's TransPort, it would create an infinite routing loop. nulltrace solves this by running Tor as a dedicated system user (`_nulltrace_tor`, UID 399) and using `pf`'s user-based filtering to exempt that user's traffic from redirection:
+Tor needs to connect directly to relay nodes. If `pf` blocked Tor's own outgoing connections, nothing would work. nulltrace runs Tor as `_nulltrace_tor` (UID 399) so `pf` can exempt that specific user:
 
 ```pf
-# Tor daemon connects directly to relays
+# Only Tor daemon can connect out
 pass out quick proto tcp user _nulltrace_tor flags S/SA keep state
 
-# Everything else gets routed through Tor
-pass out on $ext_if route-to (lo0 127.0.0.1) proto tcp from any to !127.0.0.0/8
+# Everything else is blocked
+block drop all
 ```
 
-This means:
-- **Browsers** (Safari, Chrome, Firefox) — all traffic through Tor
-- **Terminal apps** (curl, wget, git, ssh) — all traffic through Tor
-- **Electron apps** (Slack, Discord, VS Code) — all traffic through Tor
-- **System services** (software update, iCloud) — blocked or through Tor
-- **DNS queries** — all resolved through Tor (no DNS leaks)
-- **IPv6** — completely blocked (no IPv6 leaks)
+### Coverage
 
-### Transparent vs Proxy Mode
+| App Type | How it uses Tor | Leak if no proxy? |
+|----------|----------------|-------------------|
+| **Browsers** (Safari, Chrome, Firefox) | System SOCKS proxy | No — pf blocks |
+| **Terminal** (curl, wget, git) | `ALL_PROXY` env var | No — pf blocks |
+| **Electron apps** (Slack, VS Code) | System SOCKS proxy | No — pf blocks |
+| **System services** (iCloud, updates) | System SOCKS proxy | No — pf blocks |
+| **IPv6** | Completely disabled | No — pf blocks |
 
-nulltrace supports two Tor modes, configurable via `TOR_MODE` in `~/.nulltrace/config`:
+### Enforcement vs Proxy Mode
 
-| | Transparent (default) | Proxy |
+| | Enforcement (default) | Proxy |
 |---|---|---|
 | **Config value** | `TOR_MODE=transparent` | `TOR_MODE=proxy` |
-| **Mechanism** | `pf` packet filter (kernel-level) | macOS system SOCKS proxy |
-| **Coverage** | Every app, every connection | Only apps respecting system proxy |
-| **DNS** | Through Tor DNSPort | Through configured DNS provider |
-| **Leak protection** | Complete (non-Tor traffic blocked) | Partial (apps can bypass proxy) |
+| **Mechanism** | SOCKS proxy + pf killswitch | macOS system SOCKS proxy only |
+| **Leak protection** | Complete (non-Tor traffic blocked by pf) | Partial (apps can bypass proxy) |
 | **Requires** | `_nulltrace_tor` user, root | Root for proxy config |
 | **Best for** | Maximum privacy | Quick setup, compatibility |
 
@@ -270,10 +275,8 @@ Settings are stored in `~/.nulltrace/config`:
 
 ```ini
 # ── Tor ──────────────────────────────────────────────────
-TOR_MODE="transparent"           # transparent (pf-based, all traffic) or proxy (SOCKS only)
+TOR_MODE="transparent"           # transparent (SOCKS + pf killswitch) or proxy (SOCKS only)
 TOR_SOCKS_PORT="9050"           # Tor SOCKS5 port
-TOR_TRANS_PORT="9040"           # Tor TransPort (transparent mode only)
-TOR_DNS_PORT="9053"             # Tor DNSPort (transparent mode only)
 
 # ── Network ──────────────────────────────────────────────
 DNS_PROVIDER="cloudflare"        # cloudflare, quad9, custom (proxy mode only)
@@ -294,7 +297,7 @@ LOG_LEVEL="info"                # debug, info, warn, error
 
 | Value | Behavior |
 |-------|----------|
-| `transparent` | (Default) Creates `_nulltrace_tor` user, runs Tor as that user, applies `pf` rules to redirect ALL TCP/DNS through Tor. Non-Tor traffic is blocked. DNS goes through Tor's DNSPort. |
+| `transparent` | (Default) Creates `_nulltrace_tor` user, runs Tor as that user, sets system SOCKS proxy + env vars, applies `pf` killswitch that blocks all non-Tor traffic. |
 | `proxy` | Sets macOS system SOCKS proxy to Tor. Only apps that respect system proxy settings use Tor. DNS goes through configured provider (Cloudflare/Quad9). Legacy mode for compatibility. |
 
 ## VPN Support
@@ -345,10 +348,10 @@ nulltrace.sh                        Main entry point (interactive menu + CLI)
     └── tor.log                     Tor daemon log
 ```
 
-### Transparent Tor Data Flow
+### Enforcement Data Flow
 
 ```
-privacy-on (transparent mode):
+privacy-on:
                                                         
   ❶ MAC spoof ──► random unicast MAC on Wi-Fi           
   ❷ Hostname ──► scutil --set * "Lisa"                  
@@ -356,24 +359,23 @@ privacy-on (transparent mode):
   ❹ Tracking ──► /etc/hosts block list                  
   ❺ Location ──► launchctl unload locationd              
   ❻ Tor start ──► sudo -u _nulltrace_tor tor             
-     │            TransPort 127.0.0.1:9040               
-     │            DNSPort   127.0.0.1:9053               
-     │            SocksPort 127.0.0.1:9050               
-  ❼ pf rules ──► rdr on lo0 → TransPort (TCP)           
-     │            rdr on lo0 → DNSPort (UDP 53)          
-     │            pass out user _nulltrace_tor (Tor relays)
-     │            route-to lo0 all outgoing TCP/DNS      
+     │            SocksPort 0.0.0.0:9050                 
+  ❼ Proxy ────► System SOCKS proxy → 127.0.0.1:9050     
+     │           ALL_PROXY / http_proxy env vars         
+     │           DNS → Cloudflare 1.1.1.1                
+  ❽ pf rules ──► pass out user _nulltrace_tor only       
      │            block drop all (everything else)       
      │            block inet6 all (no IPv6)              
-  ❽ ProxyChains config                                   
+  ❾ ProxyChains config                                   
                                                         
 privacy-off:
                                                         
   ❶ pf disable + restore previous rules                 
-  ❷ Kill Tor daemon (_nulltrace_tor)                    
-  ❸ Restore IPv6, DNS, hostname                         
-  ❹ Remove tracking blocks                               
-  ❺ Clean runtime files                                  
+  ❷ Remove system SOCKS proxy                           
+  ❸ Kill Tor daemon (_nulltrace_tor)                    
+  ❹ Restore IPv6, DNS, hostname                         
+  ❺ Remove tracking blocks                               
+  ❻ Clean runtime files                                  
 ```
 
 ## Requirements
@@ -388,9 +390,9 @@ privacy-off:
 
 Missing dependencies are detected on startup with an option to auto-install.
 
-### Transparent Mode Additional Requirements
+### Enforcement Mode Additional Requirements
 
-The transparent Tor mode automatically handles these during first run:
+Automatically handled during first `nton` run:
 
 - **`_nulltrace_tor` system user** — Created via `dscl` (UID 399, hidden from login screen)
 - **`/var/lib/nulltrace-tor/`** — Tor data directory owned by `_nulltrace_tor`
@@ -398,10 +400,20 @@ The transparent Tor mode automatically handles these during first run:
 
 Run `sudo ./scripts/tor_transparent.sh setup` to pre-create the user and directories.
 
+### Terminal Proxy Setup
+
+After `nton`, new terminal windows need the proxy environment loaded:
+
+```bash
+source /tmp/nulltrace_proxy_env
+```
+
+This sets `ALL_PROXY`, `http_proxy`, and `https_proxy` so that curl, wget, git, and other tools use Tor. Without this, terminal traffic gets **blocked by pf** (not leaked).
+
 ## Security Design
 
-- **Zero traffic leaks** — In transparent mode, `pf` blocks all traffic that doesn't go through Tor. There is no path for packets to bypass the proxy.
-- **User-based loop prevention** — Tor runs as `_nulltrace_tor`; `pf` exempts only that user's traffic from redirection, preventing infinite routing loops without fragile port-based allowlists.
+- **Zero traffic leaks** — `pf` blocks all outgoing traffic except from the `_nulltrace_tor` user. Apps that don't use the SOCKS proxy have their traffic blocked, not leaked.
+- **User-based enforcement** — Tor runs as `_nulltrace_tor`; `pf` allows only that user to connect out. No port-based allowlists that could be exploited.
 - **HTTPS only** — All external API calls use `secure_curl()` which rejects HTTP.
 - **Secure temp files** — `mktemp` in `~/.nulltrace/runtime/` (mode 700).
 - **IPv6 leak protection** — Completely blocked in `pf` rules + `networksetup -setv6off`.
