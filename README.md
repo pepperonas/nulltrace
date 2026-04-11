@@ -158,6 +158,11 @@ alias nts='/path/to/nulltrace.sh status'
 alias nton='/path/to/nulltrace.sh privacy-on'
 alias ntoff='/path/to/nulltrace.sh privacy-off'
 
+# Tor status in terminal prompt (right side, disappears while typing)
+_nt_prompt() { pgrep -x tor >/dev/null 2>&1 && echo "%F{green}🧅 TOR%f" || echo ""; }
+setopt PROMPT_SUBST
+RPROMPT='$(_nt_prompt)'
+
 # IP & Location — auto-detects Tor and routes accordingly
 myip() {
   local flags=()
@@ -194,6 +199,7 @@ alias newip='/path/to/nulltrace.sh tor new-identity \
 | `ntoff` | — | Restore normal settings |
 | `myip` | Auto-detect | Show current IP & location (uses Tor if running) |
 | `newip` | Yes | Request new Tor exit node, show new location |
+| `RPROMPT` | Auto-detect | Shows `🧅 TOR` on the right side of every prompt line when Tor is active |
 
 ## Usage
 
