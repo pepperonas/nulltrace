@@ -175,19 +175,20 @@ new_identity() {
         return 1
     fi
 
-    if pkill -HUP tor 2>/dev/null; then
+    # Signal an Tor senden (auch als _nulltrace_tor User)
+    if pkill -HUP tor 2>/dev/null || sudo pkill -HUP -u _nulltrace_tor tor 2>/dev/null; then
         echo "✅ Signal gesendet. Warte auf neue Verbindung..."
-        sleep 3
+        sleep 5
 
         local tor_port
         tor_port="$(get_config TOR_SOCKS_PORT 9050)"
         local new_ip
-        new_ip=$(secure_curl "https://icanhazip.com" --socks5 "localhost:$tor_port" 2>/dev/null)
+        new_ip=$(curl -4 -s --connect-timeout 10 --socks5-hostname "127.0.0.1:$tor_port" https://icanhazip.com 2>/dev/null)
         if [ -n "$new_ip" ]; then
             echo "✅ Neue IP-Adresse: $new_ip"
 
             local location_info
-            location_info=$(secure_curl "https://ipapi.co/${new_ip}/json/" --socks5 "localhost:$tor_port" 2>/dev/null)
+            location_info=$(curl -4 -s --connect-timeout 10 --socks5-hostname "127.0.0.1:$tor_port" "https://ipapi.co/${new_ip}/json/" 2>/dev/null)
             if [ -n "$location_info" ]; then
                 local city country
                 city=$(echo "$location_info" | jq -r '.city // empty' 2>/dev/null)
