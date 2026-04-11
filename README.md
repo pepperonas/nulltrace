@@ -31,13 +31,9 @@
   <img src="https://img.shields.io/badge/traffic_leak-zero-red?style=flat-square" alt="Zero Leak"/>
 </p>
 
-<h1 align="center">
-  <br/>
-  nulltrace
-  <br/>
-</h1>
-
-<h4 align="center">Fire & Forget Privacy for macOS</h4>
+<p align="center">
+  <img src="banner.png" alt="nulltrace — Fire & Forget Privacy for macOS" width="100%"/>
+</p>
 
 <p align="center">
   One command. Full privacy. Zero traces.
