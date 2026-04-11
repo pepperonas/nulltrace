@@ -60,6 +60,20 @@ SUDOERS_CONTENT=$(cat << 'EOF'
 %admin ALL=(ALL) NOPASSWD: /usr/bin/killall tor
 %admin ALL=(ALL) NOPASSWD: /usr/bin/killall SwiftBar
 %admin ALL=(ALL) NOPASSWD: /usr/bin/pkill -f tor
+%admin ALL=(ALL) NOPASSWD: /usr/bin/pkill -u _nulltrace_tor *
+%admin ALL=(ALL) NOPASSWD: /usr/bin/kill *
+
+# Tor Enforcement (_nulltrace_tor user)
+%admin ALL=(ALL) NOPASSWD: /usr/bin/sudo -u _nulltrace_tor *
+%admin ALL=(ALL) NOPASSWD: /usr/bin/dscl . -create *
+%admin ALL=(ALL) NOPASSWD: /usr/bin/dscl . -read *
+%admin ALL=(ALL) NOPASSWD: /usr/bin/dscl . -list *
+%admin ALL=(ALL) NOPASSWD: /bin/mkdir -p /var/lib/nulltrace-tor
+%admin ALL=(ALL) NOPASSWD: /usr/sbin/chown _nulltrace_tor *
+%admin ALL=(ALL) NOPASSWD: /bin/chmod 700 /var/lib/nulltrace-tor
+
+# Tor transparent script
+%admin ALL=NOPASSWD: /Users/*/claude/nulltrace/scripts/tor_transparent.sh *
 
 # Hosts file management
 %admin ALL=(ALL) NOPASSWD: /bin/cp /etc/hosts *
