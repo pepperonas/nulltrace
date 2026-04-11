@@ -134,17 +134,17 @@ block drop all
 git clone https://github.com/pepperonas/nulltrace.git
 cd nulltrace
 
-# Optional: sudo-free operation (recommended)
-./scripts/nulltrace_sudoers_setup.sh
+# One-time: passwordless operation (installs /etc/sudoers.d/nulltrace)
+sudo ./scripts/nulltrace_sudoers_setup.sh
 
-# Go private (transparent Tor — all traffic through Tor)
-sudo ./nulltrace.sh privacy-on
+# Go private (all traffic through Tor, leaks blocked by pf)
+./nulltrace.sh privacy-on
 
 # Check status
 ./nulltrace.sh status
 
 # Restore normal settings
-sudo ./nulltrace.sh privacy-off
+./nulltrace.sh privacy-off
 ```
 
 ### Shell Aliases (recommended)
@@ -161,22 +161,30 @@ alias ntoff='/path/to/nulltrace.sh privacy-off'
 # IP & Location — auto-detects Tor and routes accordingly
 myip() {
   local flags=()
-  pgrep -x tor >/dev/null 2>&1 && flags=(--socks5 localhost:9050) && echo "🧅 Tor aktiv"
-  curl -s "${flags[@]}" https://ipapi.co/json/ \
-    | jq -r '"IP:        " + .ip,
-             "Stadt:     " + .city,
-             "Region:    " + .region,
-             "Land:      " + .country_name,
-             "ISP:       " + .org,
-             "Koordinaten: " + (.latitude|tostring) + ", " + (.longitude|tostring)'
+  pgrep -x tor >/dev/null 2>&1 \
+    && flags=(--socks5-hostname 127.0.0.1:9050) && echo "🧅 Tor aktiv"
+  local r
+  r=$(curl -4 -s "${flags[@]}" https://ipapi.co/json/ 2>/dev/null)
+  if echo "$r" | jq -e '.ip' >/dev/null 2>&1; then
+    echo "$r" | jq -r '"IP:        " + .ip,
+                        "Stadt:     " + .city,
+                        "Region:    " + .region,
+                        "Land:      " + .country_name,
+                        "ISP:       " + .org,
+                        "Koordinaten: " + (.latitude|tostring) + ", " + (.longitude|tostring)'
+  else
+    echo "Fehler: API nicht erreichbar (Rate-Limit? Warte 5s und versuche erneut)"
+  fi
 }
 
 # New identity — requests a new Tor exit node and shows new location
 alias newip='/path/to/nulltrace.sh tor new-identity \
   && sleep 2 && echo "───────────────────────────" && echo "Neuer Standort:" \
-  && curl -s --socks5 localhost:9050 https://ipapi.co/json/ \
+  && curl -4 -s --socks5-hostname 127.0.0.1:9050 https://ipapi.co/json/ \
      | jq -r "\"IP:        \" + .ip, \"Stadt:     \" + .city, \"Land:      \" + .country_name"'
 ```
+
+> **Note:** `socks5-hostname` resolves DNS through Tor (not locally). The `-4` flag forces IPv4 to prevent IPv6 leaks.
 
 | Alias | Requires Tor | What it does |
 |-------|-------------|--------------|
@@ -359,7 +367,7 @@ privacy-on:
   ❹ Tracking ──► /etc/hosts block list                  
   ❺ Location ──► launchctl unload locationd              
   ❻ Tor start ──► sudo -u _nulltrace_tor tor             
-     │            SocksPort 0.0.0.0:9050                 
+     │            SocksPort 127.0.0.1:9050                 
   ❼ Proxy ────► System SOCKS proxy → 127.0.0.1:9050     
      │           ALL_PROXY / http_proxy env vars         
      │           DNS → Cloudflare 1.1.1.1                
@@ -390,15 +398,37 @@ privacy-off:
 
 Missing dependencies are detected on startup with an option to auto-install.
 
+### Passwordless Operation (sudoers)
+
+nulltrace needs root for `pf` rules, hostname changes, firewall settings, and running Tor as a dedicated user. Instead of typing your password every time, run the sudoers setup **once**:
+
+```bash
+sudo ./scripts/nulltrace_sudoers_setup.sh
+```
+
+This creates `/etc/sudoers.d/nulltrace` which grants passwordless `sudo` for **only** the specific commands nulltrace needs:
+
+| Category | Commands |
+|----------|----------|
+| **Hostname** | `scutil --set/--get ComputerName/LocalHostName/HostName` |
+| **DNS** | `dscacheutil -flushcache`, `killall mDNSResponder` |
+| **Network** | `ifconfig`, `networksetup`, `ipconfig`, `route` |
+| **Firewall** | `socketfilterfw`, `pfctl` |
+| **Tor Enforcement** | `dscl` (user mgmt), `sudo -u _nulltrace_tor`, `pkill -u` |
+| **Services** | `launchctl`, `brew services` |
+| **Hosts file** | `/etc/hosts` read/write/backup |
+| **Tor script** | `tor_transparent.sh start/stop/setup` |
+
+**Security:** No password is stored anywhere. The sudoers file only allows pre-defined commands — not arbitrary root access. Remove anytime with `sudo rm /etc/sudoers.d/nulltrace`.
+
 ### Enforcement Mode Additional Requirements
 
 Automatically handled during first `nton` run:
 
 - **`_nulltrace_tor` system user** — Created via `dscl` (UID 399, hidden from login screen)
 - **`/var/lib/nulltrace-tor/`** — Tor data directory owned by `_nulltrace_tor`
-- **Root access** — Required for `pf` rules and running Tor as system user
 
-Run `sudo ./scripts/tor_transparent.sh setup` to pre-create the user and directories.
+Run `sudo ./scripts/tor_transparent.sh setup` to pre-create the user and directories manually.
 
 ### Terminal Proxy Setup
 
@@ -408,7 +438,13 @@ After `nton`, new terminal windows need the proxy environment loaded:
 source /tmp/nulltrace_proxy_env
 ```
 
-This sets `ALL_PROXY`, `http_proxy`, and `https_proxy` so that curl, wget, git, and other tools use Tor. Without this, terminal traffic gets **blocked by pf** (not leaked).
+This sets `ALL_PROXY`, `http_proxy`, and `https_proxy` so that curl, wget, git, and other tools route through Tor. Without this, terminal traffic gets **blocked by pf** (not leaked — just blocked).
+
+Add to `~/.zshrc` for automatic loading:
+
+```bash
+[ -f /tmp/nulltrace_proxy_env ] && source /tmp/nulltrace_proxy_env
+```
 
 ## Security Design
 
@@ -417,7 +453,7 @@ This sets `ALL_PROXY`, `http_proxy`, and `https_proxy` so that curl, wget, git, 
 - **HTTPS only** — All external API calls use `secure_curl()` which rejects HTTP.
 - **Secure temp files** — `mktemp` in `~/.nulltrace/runtime/` (mode 700).
 - **IPv6 leak protection** — Completely blocked in `pf` rules + `networksetup -setv6off`.
-- **DNS leak protection** — All DNS queries redirected to Tor's DNSPort via `pf` NAT rules.
+- **DNS privacy** — DNS routed to Cloudflare 1.1.1.1 (encrypted). Terminal tools using `socks5-hostname` resolve DNS through Tor.
 - **Input validation** — Shell metacharacter filtering on all user input.
 - **Country code validation** — Strict format check for VPN geo-selection.
 - **No hardcoded paths** — Auto-detection for Homebrew prefix, Wi-Fi interface, services.
@@ -494,22 +530,38 @@ networksetup -setv6automatic Wi-Fi
 ### Check if traffic goes through Tor
 
 ```bash
-# Should show IsTor: true
-curl https://check.torproject.org/api/ip
+# Via SOCKS proxy (should show IsTor: true)
+curl -4 --socks5-hostname 127.0.0.1:9050 https://check.torproject.org/api/ip
 
-# Check pf status
+# Or use the myip alias
+myip
+
+# Check pf killswitch status
 sudo pfctl -s rules
-sudo pfctl -s nat
 ```
 
-### Switch to proxy mode (if transparent causes issues)
+### Password prompt despite sudoers setup
+
+```bash
+# Re-run the sudoers installer
+sudo ./scripts/nulltrace_sudoers_setup.sh
+
+# Verify it's installed
+cat /etc/sudoers.d/nulltrace | head -5
+```
+
+### API rate limit errors in myip
+
+ipapi.co limits free requests. Wait a few seconds between calls. The `myip` function handles this gracefully with an error message instead of crashing.
+
+### Switch to proxy mode (if enforcement causes issues)
 
 Add to `~/.nulltrace/config`:
 ```ini
 TOR_MODE=proxy
 ```
 
-This uses the legacy SOCKS proxy approach instead of pf-based transparent routing.
+This uses a basic SOCKS proxy without pf killswitch — less secure but more compatible.
 
 ## License
 
