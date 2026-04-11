@@ -5,7 +5,7 @@
 # (c) 2025 Martin Pfeffer - MIT License
 
 # Verhindere doppeltes Laden
-[ -n "$_NULLTRACE_UTILS_LOADED" ] && return 0
+[ -n "${_NULLTRACE_UTILS_LOADED:-}" ] && return 0
 _NULLTRACE_UTILS_LOADED=1
 
 # ─── Farben ──────────────────────────────────────────────────────────────────
