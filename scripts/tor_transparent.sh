@@ -90,7 +90,7 @@ write_tor_config() {
 
     cat > "$TOR_CONFIG" << EOF
 # nulltrace Tor Configuration
-SocksPort 0.0.0.0:$TOR_PORT
+SocksPort 127.0.0.1:$TOR_PORT
 DataDirectory $TOR_DATA_DIR
 Log notice file $TOR_DATA_DIR/tor.log
 PidFile $TOR_PID_FILE
@@ -221,9 +221,18 @@ start_transparent_tor() {
     echo -e "${BLUE}[7/7] Proxy-Env + Verbindungstest...${NC}"
     write_proxy_env
 
-    sleep 2
-    local test_result
-    test_result=$(curl -4 -s --connect-timeout 10 --socks5-hostname 127.0.0.1:"$TOR_PORT" https://check.torproject.org/api/ip 2>/dev/null)
+    # Warte bis Tor Circuits aufgebaut hat (SOCKS-Port offen ≠ Circuits ready)
+    local test_result=""
+    local test_retry=0
+    while [ $test_retry -lt 10 ]; do
+        sleep 3
+        test_result=$(curl -4 -s --connect-timeout 10 --socks5-hostname 127.0.0.1:"$TOR_PORT" https://check.torproject.org/api/ip 2>/dev/null)
+        if echo "$test_result" | grep -q '"IsTor":true'; then
+            break
+        fi
+        echo "  Warte auf Tor-Circuits... ($((test_retry+1))/10)"
+        ((test_retry++))
+    done
 
     if echo "$test_result" | grep -q '"IsTor":true'; then
         local tor_ip
