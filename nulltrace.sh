@@ -51,20 +51,14 @@ trap cleanup EXIT INT TERM HUP
 # Banner anzeigen
 show_banner() {
 echo ""
-echo -e "${GREEN}    ╔══════════════════════════════════════════════════════╗${NC}"
-echo -e "${GREEN}    ║                                                      ║${NC}"
-echo -e "${GREEN}    ║${NC}   ${PURPLE}███╗   ██╗ ██╗   ██╗ ██╗     ██╗  ████████╗${NC}        ${GREEN}║${NC}"
-echo -e "${GREEN}    ║${NC}   ${PURPLE}████╗  ██║ ██║   ██║ ██║     ██║  ╚══██╔══╝${NC}        ${GREEN}║${NC}"
-echo -e "${GREEN}    ║${NC}   ${PURPLE}██╔██╗ ██║ ██║   ██║ ██║     ██║     ██║${NC}           ${GREEN}║${NC}"
-echo -e "${GREEN}    ║${NC}   ${PURPLE}██║╚██╗██║ ██║   ██║ ██║     ██║     ██║${NC}           ${GREEN}║${NC}"
-echo -e "${GREEN}    ║${NC}   ${PURPLE}██║ ╚████║ ╚██████╔╝ ███████╗███████╗██║${NC}           ${GREEN}║${NC}"
-echo -e "${GREEN}    ║${NC}   ${PURPLE}╚═╝  ╚═══╝  ╚═════╝  ╚══════╝╚══════╝╚═╝${NC}           ${GREEN}║${NC}"
-echo -e "${GREEN}    ║${NC}                ${BLUE}R  A  C  E${NC}                       ${GREEN}║${NC}"
-echo -e "${GREEN}    ║                                                      ║${NC}"
-echo -e "${GREEN}    ║${NC}        ${YELLOW}Fire & Forget Privacy for macOS${NC}          ${GREEN}║${NC}"
-echo -e "${GREEN}    ║                                                      ║${NC}"
-echo -e "${GREEN}    ╚══════════════════════════════════════════════════════╝${NC}"
-echo -e "                  ${BLUE}v3.0${NC}  ${RED}·${NC}  ${GREEN}by Martin Pfeffer${NC}"
+echo -e "${PURPLE}  ███╗   ██╗██╗   ██╗██╗     ██╗  ████████╗██████╗  █████╗  ██████╗███████╗${NC}"
+echo -e "${PURPLE}  ████╗  ██║██║   ██║██║     ██║  ╚══██╔══╝██╔══██╗██╔══██╗██╔════╝██╔════╝${NC}"
+echo -e "${PURPLE}  ██╔██╗ ██║██║   ██║██║     ██║     ██║   ██████╔╝███████║██║     █████╗${NC}"
+echo -e "${PURPLE}  ██║╚██╗██║██║   ██║██║     ██║     ██║   ██╔══██╗██╔══██║██║     ██╔══╝${NC}"
+echo -e "${PURPLE}  ██║ ╚████║╚██████╔╝███████╗███████╗██║   ██║  ██║██║  ██║╚██████╗███████╗${NC}"
+echo -e "${PURPLE}  ╚═╝  ╚═══╝ ╚═════╝ ╚══════╝╚══════╝╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝╚══════╝${NC}"
+echo -e "  ${GREEN}─────────────────────────────────────────────────────────────────────────${NC}"
+echo -e "        ${YELLOW}Fire & Forget Privacy for macOS${NC}  ${RED}·${NC}  ${BLUE}v3.0${NC}  ${RED}·${NC}  ${GREEN}Martin Pfeffer${NC}"
 echo ""
 }
 
@@ -430,40 +424,44 @@ handle_privacy() {
             clear_dns_cache
             set_hostname_privacy
             enable_firewall
-            set_privacy_dns
+            # Bei transparent Tor: DNS wird durch pf auf Tor's DNSPort umgeleitet
+            if [ "$(get_config TOR_MODE transparent)" != "transparent" ]; then
+                set_privacy_dns
+            fi
             block_tracking
             disable_location
             echo ""
 
-            echo -e "${BLUE}[❸] Tor-Netzwerk aktivieren...${NC}"
-            "$TOR_SCRIPT" full-on
+            echo -e "${BLUE}[❸] Tor-Netzwerk aktivieren (transparent)...${NC}"
+            local tor_mode
+            tor_mode="$(get_config TOR_MODE transparent)"
+            if [ "$tor_mode" = "transparent" ]; then
+                sudo "$SCRIPT_DIR/scripts/tor_transparent.sh" start
+            else
+                "$TOR_SCRIPT" full-on
+            fi
             echo ""
 
             echo -e "${BLUE}[❹] ProxyChains konfigurieren...${NC}"
             "$PROXYCHAINS_SCRIPT" config
             echo ""
 
-            # Kill-Switch aktivieren wenn konfiguriert
-            if [ "$(get_config KILLSWITCH_ENABLED false)" = "true" ]; then
-                echo -e "${BLUE}[❺] Kill-Switch aktivieren...${NC}"
-                "$KILLSWITCH_SCRIPT" enable
-                "$KILLSWITCH_SCRIPT" monitor-start
-                echo ""
-            fi
-
             show_success "🔥 MAXIMALE PRIVATSPHÄRE AKTIVIERT!"
             echo ""
             echo -e "${GREEN}✓ Aktiviert:${NC}"
             echo "  • MAC-Adresse geändert (permanent)"
             echo "  • Hostname: $(get_config PRIVACY_HOSTNAME Lisa)"
-            echo "  • Tor system-weit aktiv"
-            echo "  • DNS: $(get_config DNS_PROVIDER cloudflare)"
+            if [ "$tor_mode" = "transparent" ]; then
+                echo "  • Tor: ALLER Traffic über Tor (pf transparent)"
+            else
+                echo "  • Tor: System-SOCKS-Proxy"
+            fi
+            echo "  • DNS: über Tor DNSPort"
             echo "  • Firewall: Stealth-Mode"
             echo "  • Tracking blockiert"
-            [ "$(get_config KILLSWITCH_ENABLED false)" = "true" ] && echo "  • Kill-Switch: Aktiv"
-            echo "  • Browser-Daten: 🔒 Erhalten!"
+            echo "  • IPv6: Deaktiviert"
             echo ""
-            echo -e "${YELLOW}💡 Tipp:${NC} Verwende den Tor Browser für maximale Anonymität!"
+            echo -e "${YELLOW}Hinweis:${NC} Nicht-Tor-Traffic wird von pf blockiert."
             ;;
 
         off)
@@ -479,17 +477,15 @@ handle_privacy() {
             echo ""
 
             echo -e "${BLUE}[❷] Tor deaktivieren...${NC}"
-            "$TOR_SCRIPT" full-off
+            # Transparentes Tor stoppen (inkl. pf-Regeln)
+            if pgrep -u _nulltrace_tor tor >/dev/null 2>&1 || [ -f "$NULLTRACE_RUNTIME_DIR/tor_transparent.pid" ]; then
+                sudo "$SCRIPT_DIR/scripts/tor_transparent.sh" stop
+            else
+                "$TOR_SCRIPT" full-off
+            fi
             echo ""
 
-            # Transparentes Tor falls aktiv
-            if [ -f "/tmp/tor_shell_config" ] || find "$NULLTRACE_RUNTIME_DIR" -name "tor_wrappers.*" -type d 2>/dev/null | grep -q .; then
-                echo -e "${BLUE}[❸] Transparentes Tor stoppen...${NC}"
-                handle_tor "trans-off"
-                echo ""
-            fi
-
-            echo -e "${BLUE}[❹] Einstellungen zurücksetzen...${NC}"
+            echo -e "${BLUE}[❸] Einstellungen zurücksetzen...${NC}"
             restore_original_hostname
             reset_dns_settings
             remove_tracking_blocks
@@ -499,12 +495,12 @@ handle_privacy() {
             echo ""
             echo -e "${GREEN}✓ Zurückgesetzt:${NC}"
             echo "  • Original-Hostname wiederhergestellt"
-            echo "  • Tor deaktiviert"
+            echo "  • Tor + pf-Routing deaktiviert"
             echo "  • DNS-Einstellungen zurückgesetzt"
             echo "  • Tracking-Blocks entfernt"
-            echo "  • Kill-Switch deaktiviert"
+            echo "  • IPv6 reaktiviert"
             echo ""
-            echo -e "${YELLOW}🔒 Hinweis:${NC} MAC-Adresse bleibt geändert (Sicherheit)"
+            echo -e "${YELLOW}Hinweis:${NC} MAC-Adresse bleibt geändert (Sicherheit)"
             ;;
 
         *)
