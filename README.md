@@ -477,6 +477,7 @@ Koordinaten: 59.3287, 18.0717
 
 # Not happy with the location? Get a new one:
 $ newip
+✅ Signal gesendet. Warte auf neue Verbindung...
 ✅ Neue IP-Adresse: 185.220.101.45
 📍 Neuer Standort: Amsterdam, Netherlands
 ───────────────────────────
@@ -485,17 +486,17 @@ IP:        185.220.101.45
 Stadt:     Amsterdam
 Land:      Netherlands
 
-# Verify DNS goes through Tor (should NOT show your ISP's DNS):
-$ dig +short whoami.akamai.net
-# Should return a Tor exit node IP, not your real IP
-
 # Verify with Tor Project's own check:
-$ curl -s https://check.torproject.org/api/ip | jq .
+$ curl -4 --socks5-hostname 127.0.0.1:9050 -s https://check.torproject.org/api/ip | jq .
 {
   "IsTor": true,
-  "IP": "193.189.100.202"
+  "IP": "185.220.101.45"
 }
 ```
+
+> **Important:** Always use `--socks5-hostname` (not `--socks5`) in manual curl commands.
+> With `--socks5`, DNS is resolved locally — which the pf killswitch blocks.
+> `--socks5-hostname` sends the hostname to Tor for resolution, avoiding DNS leaks.
 
 If `myip` still shows your real IP after `nton`, run `ntoff` and then `nton` again.
 
@@ -548,6 +549,18 @@ sudo ./scripts/nulltrace_sudoers_setup.sh
 
 # Verify it's installed
 cat /etc/sudoers.d/nulltrace | head -5
+```
+
+### `newip` says "Konnte neue IP nicht abrufen"
+
+In enforcement mode, Tor runs as `_nulltrace_tor`. The `newip` command sends a HUP signal to request a new circuit — this requires sudo to signal a process owned by another user. The sudoers setup handles this automatically:
+
+```bash
+# If not yet done:
+sudo ./scripts/nulltrace_sudoers_setup.sh
+
+# Then retry:
+newip
 ```
 
 ### API rate limit errors in myip
