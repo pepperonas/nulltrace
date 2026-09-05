@@ -24,7 +24,7 @@ start_tor() {
     if lsof -i :"$(get_config TOR_SOCKS_PORT 9050)" > /dev/null 2>&1; then
         echo "✅ Tor läuft auf Port $(get_config TOR_SOCKS_PORT 9050)"
         local test_result
-        test_result=$(curl --socks5 "localhost:$(get_config TOR_SOCKS_PORT 9050)" --connect-timeout 5 -s https://check.torproject.org/api/ip 2>/dev/null | grep '"IsTor":true')
+        test_result=$(curl --socks5-hostname "localhost:$(get_config TOR_SOCKS_PORT 9050)" --connect-timeout 5 -s https://check.torproject.org/api/ip 2>/dev/null | grep '"IsTor":true')
         if [ -n "$test_result" ]; then
             echo "✅ Tor-Verbindung erfolgreich getestet"
         else
@@ -119,9 +119,9 @@ show_status() {
     local tor_port
     tor_port="$(get_config TOR_SOCKS_PORT 9050)"
     local current_ip
-    current_ip=$(secure_curl "https://check.torproject.org/api/ip" --socks5 "localhost:$tor_port" 2>/dev/null | jq -r '.IP' 2>/dev/null || echo "Fehler")
+    current_ip=$(secure_curl "https://check.torproject.org/api/ip" --socks5-hostname "localhost:$tor_port" 2>/dev/null | jq -r '.IP' 2>/dev/null || echo "Fehler")
     local is_tor
-    is_tor=$(secure_curl "https://check.torproject.org/api/ip" --socks5 "localhost:$tor_port" 2>/dev/null | jq -r '.IsTor' 2>/dev/null || echo "false")
+    is_tor=$(secure_curl "https://check.torproject.org/api/ip" --socks5-hostname "localhost:$tor_port" 2>/dev/null | jq -r '.IsTor' 2>/dev/null || echo "false")
 
     if [ "$is_tor" = "true" ]; then
         echo "Aktuelle IP: $current_ip (🔒 über Tor)"
@@ -137,7 +137,7 @@ test_connection() {
 
     echo "Test 1: Direkter SOCKS5-Test"
     local socks_result
-    socks_result=$(curl -4 --socks5 "localhost:$tor_port" --connect-timeout 10 -s https://check.torproject.org/api/ip 2>/dev/null)
+    socks_result=$(curl -4 --socks5-hostname "localhost:$tor_port" --connect-timeout 10 -s https://check.torproject.org/api/ip 2>/dev/null)
     if echo "$socks_result" | grep -q '"IsTor":true'; then
         echo "✅ SOCKS5: Funktioniert"
         echo "$socks_result" | jq . 2>/dev/null || echo "$socks_result"

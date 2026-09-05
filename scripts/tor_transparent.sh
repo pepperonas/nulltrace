@@ -21,8 +21,15 @@ WIFI_IFACE="$(get_effective_wifi_interface)"
 WIFI_SERVICE="$(get_effective_wifi_service)"
 TOR_DATA_DIR="/var/lib/nulltrace-tor"
 TOR_CONFIG="$TOR_DATA_DIR/torrc"
-PF_RULES="$NULLTRACE_RUNTIME_DIR/pf_transparent.conf"
-PF_BACKUP="$NULLTRACE_RUNTIME_DIR/pf_backup.conf"
+# Root-eigener Ablageort. NICHT $NULLTRACE_RUNTIME_DIR verwenden: macOS-sudo
+# behaelt HOME (env_keep += "HOME"), dieses Skript laeuft aber als root — die
+# Dateien landeten dadurch als root:0700 im Home des Nutzers, der sein eigenes
+# ~/.nulltrace/runtime danach nicht mehr lesen konnte.
+NT_STATE_DIR="/var/run/nulltrace"
+PF_RULES="$NT_STATE_DIR/pf_transparent.conf"
+PF_BACKUP="$NT_STATE_DIR/pf_backup.conf"
+LEGACY_PF_RULES="$NULLTRACE_RUNTIME_DIR/pf_transparent.conf"
+LEGACY_PF_BACKUP="$NULLTRACE_RUNTIME_DIR/pf_backup.conf"
 TOR_PID_FILE="$TOR_DATA_DIR/tor.pid"
 PROXY_ENV_FILE="/tmp/nulltrace_proxy_env"
 
@@ -77,6 +84,25 @@ setup_tor_user() {
     log_ok "System-User '$TOR_USER' erstellt"
 }
 
+setup_state_dir() {
+    mkdir -p "$NT_STATE_DIR"
+    chown root:wheel "$NT_STATE_DIR" 2>/dev/null
+    chmod 700 "$NT_STATE_DIR"
+}
+
+# Hinterlassenschaft der alten $HOME-Ablage aufraeumen: root-eigene Dateien im
+# Home des Nutzers sperren ihn aus seinem eigenen Runtime-Verzeichnis aus.
+repair_legacy_runtime_dir() {
+    local dir="$NULLTRACE_RUNTIME_DIR"
+    [ -d "$dir" ] || return 0
+    [ -n "${SUDO_USER:-}" ] || return 0
+    [ "$(stat -f%Su "$dir" 2>/dev/null)" = "root" ] || return 0
+
+    rm -f "$LEGACY_PF_RULES" "$LEGACY_PF_BACKUP"
+    chown -R "$SUDO_USER" "$dir" 2>/dev/null
+    log_info "Alte root-eigene Runtime-Dateien in $dir bereinigt"
+}
+
 setup_tor_dirs() {
     mkdir -p "$TOR_DATA_DIR"
     chown "$TOR_USER" "$TOR_DATA_DIR"
@@ -107,7 +133,7 @@ EOF
 # ─── pf-Regeln ───────────────────────────────────────────────────────────────
 
 write_pf_rules() {
-    mkdir -p "$NULLTRACE_RUNTIME_DIR" 2>/dev/null || true
+    setup_state_dir
 
     cat > "$PF_RULES" << EOF
 # nulltrace Tor Enforcement Rules
@@ -122,8 +148,14 @@ pass quick on lo0 all
 # Tor-Daemon darf direkt raus (laeuft als $TOR_USER)
 pass out quick proto tcp user $TOR_USER flags S/SA keep state
 
-# DHCP erlauben (Netzwerk-Konnektivitaet)
-pass out quick proto udp from any port 68 to any port 67 keep state
+# DHCP erlauben — BEIDE Richtungen und ZUSTANDSLOS.
+# Die Antwort des Servers (67 -> 68) kann den State der Anfrage nicht treffen:
+# beim DISCOVER/REQUEST hat der Client noch keine IP (0.0.0.0 -> 255.255.255.255),
+# die Antwort kommt von der Server-IP. Ohne die "in"-Regel verwirft
+# "block drop all" jedes DHCP-Angebot und der Mac bekommt nach einem
+# Wi-Fi-Neustart NIE wieder eine Adresse — kein DHCP, kein Netz, kein Tor.
+pass out quick proto udp from any port 68 to any port 67 no state
+pass in  quick proto udp from any port 67 to any port 68 no state
 
 # DNS zu Cloudflare erlauben (fuer initiale Verbindung)
 pass out quick proto {tcp udp} to 1.1.1.1 port 53 keep state
@@ -161,6 +193,8 @@ start_transparent_tor() {
     echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
 
+    repair_legacy_runtime_dir
+
     # 1. User einrichten
     echo -e "${BLUE}[1/7] System-User...${NC}"
     setup_tor_user
@@ -177,7 +211,17 @@ start_transparent_tor() {
 
     # 4. Tor als _nulltrace_tor starten
     echo -e "${BLUE}[4/7] Tor als '$TOR_USER' starten...${NC}"
-    sudo -u "$TOR_USER" "$HOMEBREW_PREFIX/bin/tor" -f "$TOR_CONFIG" --RunAsDaemon 1 2>&1 | grep -v "^\[notice\]"
+
+    # Erst auf das Netz warten. privacy-on schaltet direkt davor das Wi-Fi neu
+    # (MAC-Spoofing) — ohne IP-Adresse startet Tor in ein totes Netz und bleibt
+    # bei "Bootstrapped 0%" haengen.
+    if ! wait_for_network "$WIFI_IFACE" 45; then
+        log_warn "$WIFI_IFACE hat noch keine IP-Adresse — Tor startet trotzdem"
+    fi
+
+    # Der Filter muss auf das Muster IRGENDWO in der Zeile passen: Tor stellt
+    # jeder Meldung einen Zeitstempel voran ("Sep 05 18:18:50.345 [notice] ...").
+    sudo -u "$TOR_USER" "$HOMEBREW_PREFIX/bin/tor" -f "$TOR_CONFIG" --RunAsDaemon 1 2>&1 | grep -v "\[notice\]"
 
     # Warten auf Bootstrap
     local retry=0
@@ -207,14 +251,21 @@ start_transparent_tor() {
 
     # 6. pf-Regeln anwenden (Killswitch)
     echo -e "${BLUE}[6/7] pf-Killswitch aktivieren...${NC}"
-    pfctl -s rules > "$PF_BACKUP" 2>/dev/null || true
+    setup_state_dir
+    # Backup NUR beim ersten Mal: ein zweiter privacy-on-Lauf wuerde sonst die
+    # Killswitch-Regeln selbst als "Original" sichern.
+    if [ ! -s "$PF_BACKUP" ]; then
+        pfctl -s rules > "$PF_BACKUP" 2>/dev/null || true
+    fi
     write_pf_rules
     networksetup -setv6off "$WIFI_SERVICE" 2>/dev/null
 
-    if pfctl -f "$PF_RULES" -e 2>/dev/null; then
+    # NICHT "pfctl -f datei -e" am Stueck pruefen: laeuft pf bereits, meldet der
+    # Aufruf "pf already enabled" und Exit 1 — obwohl die Regeln geladen wurden.
+    if pf_load_and_enable "$PF_RULES"; then
         log_ok "pf-Killswitch aktiv (non-Tor traffic geblockt)"
     else
-        log_error "pf-Regeln fehlgeschlagen"
+        log_error "pf-Killswitch NICHT aktiv — der Traffic ist UNGESCHUETZT!"
     fi
 
     # 7. Proxy-Env + Verbindungstest
@@ -253,7 +304,20 @@ start_transparent_tor() {
         echo ""
     else
         log_error "Tor-Verbindung fehlgeschlagen"
+
+        # Ursache eingrenzen statt den Nutzer raten lassen
+        local ip bootstrap
+        ip="$(/usr/sbin/ipconfig getifaddr "$WIFI_IFACE" 2>/dev/null)"
+        if [ -z "$ip" ]; then
+            log_error "  Ursache: $WIFI_IFACE hat KEINE IP-Adresse — DHCP fehlgeschlagen."
+            log_error "  Pruefe die DHCP-Regeln in $PF_RULES (in UND out noetig)."
+        else
+            echo "  $WIFI_IFACE: $ip"
+            bootstrap="$(grep -o 'Bootstrapped [0-9]*%' "$TOR_DATA_DIR/tor.log" 2>/dev/null | tail -1)"
+            echo "  Tor-Bootstrap: ${bootstrap:-unbekannt}"
+        fi
         echo "  Teste: curl --socks5-hostname 127.0.0.1:$TOR_PORT https://check.torproject.org/api/ip"
+        echo "  Log:   sudo -u $TOR_USER tail -20 $TOR_DATA_DIR/tor.log"
     fi
 }
 
@@ -264,6 +328,8 @@ stop_transparent_tor() {
 
     echo -e "${YELLOW}Stoppe Tor Enforcement...${NC}"
     echo ""
+
+    repair_legacy_runtime_dir
 
     # 1. pf deaktivieren
     echo -e "${BLUE}[1/6] pf-Killswitch entfernen...${NC}"
@@ -304,7 +370,7 @@ stop_transparent_tor() {
 
     # 6. Aufraeumen
     echo -e "${BLUE}[6/6] Aufraeumen...${NC}"
-    rm -f "$PF_RULES" "$PF_BACKUP" "$PROXY_ENV_FILE"
+    rm -f "$PF_RULES" "$PF_BACKUP" "$LEGACY_PF_RULES" "$LEGACY_PF_BACKUP" "$PROXY_ENV_FILE"
     # Legacy-Cleanup
     find "$NULLTRACE_RUNTIME_DIR" -name "tor_wrappers.*" -type d -exec rm -rf {} + 2>/dev/null
     rm -f /tmp/tor_shell_config 2>/dev/null
@@ -346,7 +412,7 @@ show_status() {
     fi
 
     # pf
-    if pfctl -s info 2>/dev/null | grep -q "Status: Enabled"; then
+    if pf_is_enabled; then
         echo -e "  pf-Killswitch:  ${GREEN}Aktiv${NC}"
     else
         echo -e "  pf-Killswitch:  ${RED}Deaktiviert${NC}"
@@ -382,6 +448,8 @@ case "${1:-}" in
         check_root
         setup_tor_user
         setup_tor_dirs
+        setup_state_dir
+        repair_legacy_runtime_dir
         log_ok "Setup abgeschlossen"
         ;;
     *)

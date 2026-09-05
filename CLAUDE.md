@@ -113,7 +113,8 @@ Fallback mode: `tor_control.sh full-on` starts Tor as current user, sets system 
 | Path | Purpose |
 |------|---------|
 | `~/.nulltrace/config` | User configuration |
-| `~/.nulltrace/runtime/` | PID files, pf rules (mode 700) |
+| `~/.nulltrace/runtime/` | PID files, killswitch pf rules (user-owned, mode 700) |
+| `/var/run/nulltrace/` | pf rules + pf backup written by root (tor_transparent.sh) |
 | `~/.nulltrace/original_hostname` | Hostname backup for restore |
 | `~/.nulltrace/nulltrace.log` | Activity log (rotates at 1MB) |
 | `/var/lib/nulltrace-tor/` | Tor data dir (owned by _nulltrace_tor) |
@@ -124,16 +125,23 @@ Fallback mode: `tor_control.sh full-on` starts Tor as current user, sets system 
 ## Gotchas
 
 - **`set -u` and indirect expansion**: Every `${!var}` must be `${!var:-}`. Omitting `:-` causes unbound variable errors that silently break config lookups and mode detection.
-- **pf rules are not idempotent**: `pfctl -f <file>` replaces the entire ruleset. The backup/restore pattern in tor_transparent.sh handles this, but running privacy-on twice without privacy-off can overwrite the original pf backup.
+- **pf rules are not idempotent**: `pfctl -f <file>` replaces the entire ruleset. tor_transparent.sh now writes `pf_backup.conf` only when it does not exist yet, so a second privacy-on cannot save the killswitch rules as the "original".
+- **A killswitch MUST pass DHCP in BOTH directions, statelessly**: the server's reply (67 → 68) cannot match the state created by the request — during DISCOVER/REQUEST the client has no IP (`0.0.0.0` → `255.255.255.255`) while the reply comes from the server's address. With only the `out` rule, `block drop all` swallows every DHCP offer and the Mac never gets an address again after a link change. Symptom: `Bootstrapped 0%` forever in tor.log plus `DHCP en0: INIT ... status = 'no server'` in `log show --predicate 'process == "configd"'`.
+- **`pfctl -f rules -e` returns 1 when pf is already enabled** ("pf already enabled") — even though the rules loaded fine. Never treat that exit code as failure; load and enable separately and check `pfctl -s info` afterwards (`pf_load_and_enable()` in utils.sh). macOS enables pf on its own for AirDrop/Internet Sharing/stealth mode, so "already enabled" is the normal case, not the exception.
+- **`pfctl` always needs root**, `-s info` included — an unprivileged call dies with `/dev/pf: Permission denied` and a naive `grep "Status: Enabled"` then silently reports "disabled". Use `pf_is_enabled()`; to tell *our* killswitch apart from macOS's own pf usage, use `pf_nulltrace_rules_loaded()` (looks for the `user = <uid of _nulltrace_tor>` rule).
+- **macOS sudo keeps `HOME`** (`env_keep += "HOME MAIL"` in /etc/sudoers), so a root script still sees the user's home. tor_transparent.sh used to drop root-owned 0700 files into `~/.nulltrace/runtime`, locking the user out of their own directory; root state now lives in `/var/run/nulltrace` and `repair_legacy_runtime_dir()` cleans up the old ones.
 - **SocksPort must be 127.0.0.1**: Using `0.0.0.0` triggers a Tor warning about open proxies.
 - **Tor circuit bootstrap takes time**: After SOCKS port opens, circuits need ~10-30s to build. The test in tor_transparent.sh retries up to 10x with 3s intervals.
 - **Sudoers path assumption**: The sudoers entry uses `/Users/*/claude/nulltrace/scripts/tor_transparent.sh *`. Moving the repo breaks passwordless sudo.
-- **MAC spoofing may fail silently**: `ifconfig ioctl` errors are non-fatal. The MAC address change relies on Wi-Fi off/on cycling which may not work on all hardware.
+- **MAC spoofing is impossible on Apple Silicon**: `ifconfig <if> ether <mac>` fails with `ioctl (SIOCAIFADDR): Can't assign requested address` on M-series Wi-Fi — powered on *and* off, and `airport -z` (the old disassociate trick) was removed in macOS 14.4. `mac_spoofer.sh` therefore **verifies the result and exits 1** instead of claiming success, and it does **not** power-cycle Wi-Fi when the change failed — that cycle used to be pure collateral damage (dropped link + a fresh DHCP round). macOS's own *Private Wi-Fi Address* already randomises what goes on the air; compare `networksetup -getmacaddress en0` (hardware) with `ifconfig en0 | grep ether` (in use).
 - **Homebrew Tor has no TransPort**: Transparent TCP interception via pf rdr rules is impossible with stock Homebrew Tor. The enforcement mode uses SOCKS proxy + pf killswitch instead.
 - **DNS in transparent mode**: DNS goes to Cloudflare 1.1.1.1 (allowed by pf). Terminal tools using `socks5-hostname` resolve DNS through Tor. Browser DNS depends on SOCKS proxy settings.
 - **`new-identity` and the `_nulltrace_tor` user**: `pkill -HUP tor` can't signal Tor when it runs as `_nulltrace_tor`. Use `sudo pkill -HUP -u _nulltrace_tor tor` as fallback. The function in `tor_control.sh` tries both.
 - **Always use `--socks5-hostname`, never `--socks5`**: With `--socks5`, curl resolves DNS locally — which pf blocks in enforcement mode. `--socks5-hostname` sends the hostname to Tor for resolution.
 - **ipapi.co rate limits**: The `myip` function can fail with non-JSON responses. Always handle jq parse errors gracefully.
+- **`socketfilterfw` moves under you**: `--setloggingmode` no longer exists on macOS 26 (Tahoe) and a blind call just prints the usage block. Feature-detect via `socketfilterfw -h`. Also note the two getters answer differently: `--getglobalstate` says "Firewall is **enabled**", `--getstealthmode` says "Firewall stealth mode is **on**" — grepping for "enabled" on stealth mode never matches.
+- **`disable_location` cannot work**: `launchctl unload .../com.apple.locationd.plist` returns 0 while printing "Unload failed: 5: Input/output error" — locationd is SIP-protected. The function now checks `pgrep locationd` and points at System Settings instead of claiming success.
+- **Anything that reports success must verify it.** MAC spoofing, location services, firewall stealth mode and the pf killswitch all used to print ✅ for operations that did nothing. In a privacy tool a false ✅ is worse than a visible error.
 
 ## Security Constraints
 

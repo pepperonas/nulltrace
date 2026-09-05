@@ -258,6 +258,71 @@ get_effective_wifi_interface() {
     fi
 }
 
+# Wartet bis das Interface eine IPv4-Adresse hat.
+# Nach einem Wi-Fi-Power-Cycle dauert Assoziation + DHCP typisch 5-20 s;
+# ohne dieses Warten starten Tor & Co. in ein totes Netz.
+wait_for_network() {
+    local iface="${1:-}"
+    [ -n "$iface" ] || iface="$(get_effective_wifi_interface)"
+    local timeout="${2:-45}"
+    local waited=0
+
+    while [ "$waited" -lt "$timeout" ]; do
+        if [ -n "$(/usr/sbin/ipconfig getifaddr "$iface" 2>/dev/null)" ]; then
+            return 0
+        fi
+        sleep 1
+        waited=$((waited + 1))
+    done
+    return 1
+}
+
+# ─── pf-Hilfsfunktionen ─────────────────────────────────────────────────────
+# pfctl braucht IMMER root (/dev/pf ist 0600 root). Ohne diesen Wrapper meldet
+# jede Statusabfrage aus einem User-Prozess stumm "deaktiviert".
+_pfctl() {
+    if [ "$(id -u)" -eq 0 ]; then
+        /sbin/pfctl "$@"
+    else
+        sudo /sbin/pfctl "$@"
+    fi
+}
+
+pf_is_enabled() {
+    _pfctl -s info 2>/dev/null | grep -q "Status: Enabled"
+}
+
+# Sind UNSERE Regeln geladen? macOS aktiviert pf auch selbst (AirDrop,
+# Internet-Sharing, Stealth-Mode) — "pf ist an" allein sagt nichts darueber,
+# ob der nulltrace-Killswitch wirklich greift.
+pf_nulltrace_rules_loaded() {
+    local uid
+    uid="$(id -u _nulltrace_tor 2>/dev/null)"
+    [ -n "$uid" ] || return 1
+    _pfctl -sr 2>/dev/null | grep -q "user = $uid"
+}
+
+# Laedt eine Regeldatei und aktiviert pf.
+# WICHTIG: `pfctl -f datei -e` liefert Exit 1 mit "pf already enabled", wenn pf
+# schon laeuft — obwohl die Regeln geladen wurden. Deshalb getrennt ausfuehren
+# und am Ende den tatsaechlichen Zustand pruefen statt den Exit-Code.
+pf_load_and_enable() {
+    local rules_file="$1"
+
+    if ! _pfctl -f "$rules_file" 2>/dev/null; then
+        log_error "pf-Regeln konnten nicht geladen werden: $rules_file"
+        _pfctl -n -f "$rules_file" 2>&1 \
+            | grep -v "^pfctl: Use of -f\|^present in the main\|^See /etc/pf.conf" >&2
+        return 1
+    fi
+
+    if ! pf_is_enabled; then
+        _pfctl -e >/dev/null 2>&1
+    fi
+
+    pf_is_enabled
+}
+
 is_tor_running() {
     pgrep -x "tor" > /dev/null 2>&1 || lsof -i :"$(get_config TOR_SOCKS_PORT 9050)" > /dev/null 2>&1
 }

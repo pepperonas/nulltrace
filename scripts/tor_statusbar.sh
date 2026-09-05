@@ -41,7 +41,7 @@ tor_running() {
 # Check if we're connected through Tor
 tor_connected() {
     local result
-    result=$(curl -4 -s --connect-timeout 2 --socks5 localhost:9050 https://check.torproject.org/api/ip 2>/dev/null | grep -o '"IsTor":true' 2>/dev/null)
+    result=$(curl -4 -s --connect-timeout 2 --socks5-hostname localhost:9050 https://check.torproject.org/api/ip 2>/dev/null | grep -o '"IsTor":true' 2>/dev/null)
     [ -n "$result" ]
 }
 
@@ -53,7 +53,7 @@ proxy_enabled() {
 # Get current IP (HTTPS only)
 get_ip() {
     if tor_connected; then
-        curl -4 -s --connect-timeout 2 --socks5 localhost:9050 https://icanhazip.com 2>/dev/null || echo "Unknown"
+        curl -4 -s --connect-timeout 2 --socks5-hostname localhost:9050 https://icanhazip.com 2>/dev/null || echo "Unknown"
     else
         curl -4 -s --connect-timeout 2 https://icanhazip.com 2>/dev/null || echo "Unknown"
     fi
@@ -69,7 +69,7 @@ get_location() {
 
     local location_info
     if tor_connected; then
-        location_info=$(curl -4 -s --connect-timeout 3 --socks5 localhost:9050 "https://ipapi.co/${ip}/json/" 2>/dev/null)
+        location_info=$(curl -4 -s --connect-timeout 3 --socks5-hostname localhost:9050 "https://ipapi.co/${ip}/json/" 2>/dev/null)
     else
         location_info=$(curl -4 -s --connect-timeout 3 "https://ipapi.co/${ip}/json/" 2>/dev/null)
     fi
@@ -98,7 +98,7 @@ if tor_running; then
         echo "---"
         echo "✅ Verbunden via Tor | color=green"
 
-        tor_info=$(curl -4 -s --connect-timeout 2 --socks5 localhost:9050 https://check.torproject.org/api/ip 2>/dev/null)
+        tor_info=$(curl -4 -s --connect-timeout 2 --socks5-hostname localhost:9050 https://check.torproject.org/api/ip 2>/dev/null)
         if [ -n "$tor_info" ]; then
             tor_ip=$(echo "$tor_info" | jq -r '.IP // empty' 2>/dev/null)
             if [ -n "$tor_ip" ]; then

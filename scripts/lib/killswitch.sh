@@ -39,6 +39,10 @@ pass quick on lo0 all
 # Tor SOCKS-Port erlauben
 pass out quick proto tcp to 127.0.0.1 port $tor_port
 
+# Tor-Daemon von nulltrace darf direkt raus. Die Portliste unten (9001/9030)
+# reicht nicht: die meisten Relays hoeren auf 443.
+pass out quick proto tcp user _nulltrace_tor flags S/SA keep state
+
 # VPN-Tunnel-Interfaces erlauben (utun*)
 pass quick on utun0 all
 pass quick on utun1 all
@@ -49,16 +53,21 @@ pass quick on utun3 all
 pass out quick proto {tcp udp} to 1.1.1.1 port 53
 pass out quick proto {tcp udp} to 1.0.0.1 port 53
 
-# DHCP erlauben (Netzwerk-Konnektivität)
-pass out quick proto udp from any port 68 to any port 67
+# DHCP erlauben — BEIDE Richtungen. Ohne die "in"-Regel verwirft "block all"
+# die Antwort des Servers (67 -> 68) und der Mac bekommt nach einem
+# Link-Wechsel nie wieder eine IP-Adresse.
+pass out quick proto udp from any port 68 to any port 67 no state
+pass in  quick proto udp from any port 67 to any port 68 no state
 
 # Lokales Netzwerk erlauben (für Tor-Relay-Verbindungen)
 pass out quick proto tcp to any port 9001
 pass out quick proto tcp to any port 9030
 EOF
 
-    # Regeln aktivieren
-    if sudo pfctl -f "$KILLSWITCH_PF_RULES" -e 2>/dev/null; then
+    # Regeln aktivieren. NICHT den Exit-Code von "pfctl -f datei -e" pruefen:
+    # laeuft pf bereits, meldet der Aufruf "pf already enabled" und Exit 1 —
+    # obwohl die Regeln geladen wurden.
+    if pf_load_and_enable "$KILLSWITCH_PF_RULES"; then
         log_ok "Kill-Switch aktiviert - nur Tor/VPN-Traffic erlaubt"
         log_to_file "INFO" "Kill-Switch aktiviert"
         return 0
@@ -94,7 +103,9 @@ check_connection() {
     if is_tor_running; then
         # Prüfe ob Tor-Verbindung funktioniert
         local tor_check
-        tor_check=$(secure_curl "https://check.torproject.org/api/ip" --socks5 "localhost:$tor_port" 2>/dev/null)
+        # --socks5-hostname, NICHT --socks5: letzteres loest DNS lokal auf, was
+        # der Kill-Switch blockt — der Monitor haelt Tor dann faelschlich fuer tot.
+        tor_check=$(secure_curl "https://check.torproject.org/api/ip" --socks5-hostname "localhost:$tor_port" 2>/dev/null)
         if echo "$tor_check" | grep -q '"IsTor":true'; then
             return 0
         fi
@@ -169,10 +180,10 @@ show_status() {
     echo ""
 
     # pf-Status
-    if pfctl -s info 2>/dev/null | grep -q "Status: Enabled"; then
+    if pf_is_enabled; then
         echo -e "  pfctl: ${GREEN}Aktiviert${NC}"
         local rule_count
-        rule_count=$(pfctl -s rules 2>/dev/null | grep -c "block\|pass")
+        rule_count=$(sudo pfctl -s rules 2>/dev/null | grep -c "block\|pass")
         echo "  Aktive Regeln: $rule_count"
     else
         echo -e "  pfctl: ${RED}Deaktiviert${NC}"

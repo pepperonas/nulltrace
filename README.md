@@ -53,13 +53,13 @@ This will:
 
 | Step | Action | Detail |
 |------|--------|--------|
-| 1 | **MAC Spoofing** | Random unicast MAC on Wi-Fi (persists after privacy-off) |
+| 1 | **MAC Spoofing** | Random locally-administered MAC on Wi-Fi (persists after privacy-off). **Not supported on Apple Silicon** — see [Known Limitations](#known-limitations) |
 | 2 | **Hostname Change** | Sets hostname to configurable alias (default: "Lisa") |
 | 3 | **Firewall** | Enables macOS ALF firewall + stealth mode |
 | 4 | **Tracking Block** | Adds tracking domains to `/etc/hosts` |
-| 5 | **Location Services** | Disables `locationd` |
+| 5 | **Location Services** | Attempts to unload `locationd` — blocked by SIP on current macOS, see [Known Limitations](#known-limitations) |
 | 6 | **Transparent Tor** | ALL network traffic forced through Tor via `pf` packet filter |
-| 7 | **DNS over Tor** | All DNS queries routed through Tor's DNSPort |
+| 7 | **DNS** | System DNS pinned to Cloudflare `1.1.1.1` (the only resolver `pf` lets through). Terminal tools using `--socks5-hostname` resolve *inside* Tor |
 | 8 | **IPv6 Block** | IPv6 completely disabled to prevent leaks |
 | 9 | **ProxyChains** | Configures for Tor routing |
 
@@ -68,6 +68,17 @@ To restore everything:
 ```
 $ ./nulltrace.sh privacy-off
 ```
+
+### Known Limitations
+
+Two steps cannot work on current macOS. nulltrace **verifies both and says so** instead of printing a green checkmark over a no-op:
+
+| Step | Reality |
+|------|---------|
+| **MAC spoofing** | `ifconfig <if> ether <mac>` fails with `ioctl (SIOCAIFADDR): Can't assign requested address` on Apple Silicon Wi-Fi — with the interface powered on *and* off. The old disassociate trick (`airport -z`) was removed in macOS 14.4. macOS' own **Private Wi-Fi Address** already randomises what goes on the air: compare `networksetup -getmacaddress en0` (hardware) with `ifconfig en0 \| grep ether` (actually transmitted). Turn it to *Rotating* in System Settings → Wi-Fi → Details. |
+| **Location services** | `launchctl unload …/com.apple.locationd.plist` exits 0 while printing `Unload failed: 5: Input/output error` — `locationd` is SIP-protected. Only System Settings → Privacy & Security → Location Services can switch it off. |
+
+Everything else in the table works as described and is verified at runtime.
 
 ## How Tor Enforcement Works
 
@@ -100,12 +111,25 @@ nulltrace uses a **SOCKS proxy + pf killswitch** architecture. Tor runs as a ded
 Tor needs to connect directly to relay nodes. If `pf` blocked Tor's own outgoing connections, nothing would work. nulltrace runs Tor as `_nulltrace_tor` (UID 399) so `pf` can exempt that specific user:
 
 ```pf
-# Only Tor daemon can connect out
+# Everything is blocked by default
+block drop all
+
+# Loopback (apps → SOCKS proxy on localhost)
+pass quick on lo0 all
+
+# Only the Tor daemon may connect out
 pass out quick proto tcp user _nulltrace_tor flags S/SA keep state
 
-# Everything else is blocked
-block drop all
+# DHCP — BOTH directions, stateless (see below)
+pass out quick proto udp from any port 68 to any port 67 no state
+pass in  quick proto udp from any port 67 to any port 68 no state
+
+# DNS to Cloudflare, IPv6 dead
+pass out quick proto {tcp udp} to 1.1.1.1 port 53 keep state
+block quick inet6 all
 ```
+
+**The DHCP rules are not optional.** The server's reply (67 → 68) cannot match the state created by the request: during DISCOVER/REQUEST the client still has no address (`0.0.0.0` → `255.255.255.255`) while the answer arrives from the server's IP. With only the `out` rule, `block drop all` swallows every DHCP offer and the Mac never gets an address again after a link change — which looks exactly like "Tor is broken" (`Bootstrapped 0%` forever). The trade-off is deliberate: any killswitch that wants DHCP must accept UDP/68 from the local network.
 
 ### Coverage
 
@@ -343,9 +367,10 @@ nulltrace.sh                        Main entry point (interactive menu + CLI)
 │   │   └── killswitch.sh           pfctl kill-switch + background connection monitor
 │   │
 │   ├── tor_control.sh              Tor service: start/stop, SOCKS proxy, new identity
-│   ├── tor_transparent.sh          Transparent Tor: _nulltrace_tor user, pf rules,
-│   │                               TransPort/DNSPort config, full traffic redirect
-│   ├── mac_spoofer.sh              MAC address randomization (permanent across sessions)
+│   ├── tor_transparent.sh          Enforcement: _nulltrace_tor user, torrc, pf killswitch,
+│   │                               system SOCKS proxy, connection test + diagnostics
+│   ├── mac_spoofer.sh              MAC randomization — verifies the result and exits 1
+│   │                               when the driver refuses (Apple Silicon)
 │   ├── vpn_control.sh              Multi-provider VPN: connect, geo-select, chaining
 │   ├── proxychains_setup.sh        ProxyChains-ng config + shell aliases
 │   ├── security_tools.sh           Security audit: system, network, DNS, privacy, vuln
@@ -355,10 +380,13 @@ nulltrace.sh                        Main entry point (interactive menu + CLI)
 │
 ├── ~/.nulltrace/
 │   ├── config                      User configuration
-│   ├── runtime/                    PID files, pf rules, torrc (mode 700)
+│   ├── runtime/                    PID files, killswitch pf rules (user-owned, mode 700)
 │   └── original_hostname           Backup of original hostname
 │
+├── /var/run/nulltrace/             pf rules + pf backup written by root (mode 700)
+│
 └── /var/lib/nulltrace-tor/         Tor data directory (owned by _nulltrace_tor)
+    ├── torrc                       Tor config
     └── tor.log                     Tor daemon log
 ```
 
@@ -367,17 +395,20 @@ nulltrace.sh                        Main entry point (interactive menu + CLI)
 ```
 privacy-on:
                                                         
-  ❶ MAC spoof ──► random unicast MAC on Wi-Fi           
+  ❶ MAC spoof ──► random locally-administered MAC       
+     │            verified; skipped loudly if refused    
   ❷ Hostname ──► scutil --set * "Lisa"                  
-  ❸ Firewall ──► ALF on + stealth mode                  
+  ❸ Firewall ──► ALF on + stealth mode (verified)       
   ❹ Tracking ──► /etc/hosts block list                  
-  ❺ Location ──► launchctl unload locationd              
-  ❻ Tor start ──► sudo -u _nulltrace_tor tor             
+  ❺ Location ──► launchctl unload locationd (SIP: no-op)
+  ❻ Tor start ──► wait for a DHCP lease first            
+     │            sudo -u _nulltrace_tor tor             
      │            SocksPort 127.0.0.1:9050                 
   ❼ Proxy ────► System SOCKS proxy → 127.0.0.1:9050     
      │           ALL_PROXY / http_proxy env vars         
      │           DNS → Cloudflare 1.1.1.1                
   ❽ pf rules ──► pass out user _nulltrace_tor only       
+     │            pass DHCP in + out (else: no lease)    
      │            block drop all (everything else)       
      │            block inet6 all (no IPv6)              
   ❾ ProxyChains config                                   
@@ -454,10 +485,11 @@ Add to `~/.zshrc` for automatic loading:
 
 ## Security Design
 
-- **Zero traffic leaks** — `pf` blocks all outgoing traffic except from the `_nulltrace_tor` user. Apps that don't use the SOCKS proxy have their traffic blocked, not leaked.
+- **Zero traffic leaks** — `pf` blocks all outgoing traffic except from the `_nulltrace_tor` user. Apps that don't use the SOCKS proxy have their traffic blocked, not leaked. Two documented exceptions stay open by necessity: **DHCP** (UDP 67/68, otherwise the machine loses its address) and **DNS to 1.1.1.1**.
 - **User-based enforcement** — Tor runs as `_nulltrace_tor`; `pf` allows only that user to connect out. No port-based allowlists that could be exploited.
 - **HTTPS only** — All external API calls use `secure_curl()` which rejects HTTP.
-- **Secure temp files** — `mktemp` in `~/.nulltrace/runtime/` (mode 700).
+- **Secure temp files** — `mktemp` in `~/.nulltrace/runtime/` (mode 700). Root-written pf state lives in `/var/run/nulltrace` — macOS `sudo` keeps `HOME`, so writing it to the user's home would leave root-owned files there.
+- **No false green checkmarks** — every step that can silently fail (MAC, firewall, stealth mode, pf, location services) is verified against the system afterwards and reported honestly.
 - **IPv6 leak protection** — Completely blocked in `pf` rules + `networksetup -setv6off`.
 - **DNS privacy** — DNS routed to Cloudflare 1.1.1.1 (encrypted). Terminal tools using `socks5-hostname` resolve DNS through Tor.
 - **Input validation** — Shell metacharacter filtering on all user input.
@@ -521,6 +553,43 @@ id _nulltrace_tor
 sudo ./scripts/tor_transparent.sh setup
 ```
 
+### No internet at all after `privacy-on` / Tor stuck at `Bootstrapped 0%`
+
+Almost always a **missing DHCP lease**, not Tor. Check in this order:
+
+```bash
+# 1. Does the interface even have an address?
+ipconfig getifaddr en0          # empty = no lease, Tor cannot work
+
+# 2. What does the DHCP client say?
+log show --last 10m --style compact --predicate 'process == "configd"' \
+  | grep "DHCP en0"             # "no server" / "server not responding" = pf ate the reply
+
+# 3. Are both DHCP rules loaded?
+sudo pfctl -sr | grep "port = 6[78]"
+# expected:
+#   pass out quick proto udp from any port = 68 to any port = 67 no state
+#   pass in  quick proto udp from any port = 67 to any port = 68 no state
+```
+
+If the `in` rule is missing, the ruleset is stale — re-run `sudo ./scripts/tor_transparent.sh start`.
+`tor_transparent.sh` reports the cause itself when the connection test fails.
+
+### "pf-Killswitch NICHT aktiv"
+
+`pfctl -f rules -e` returns exit 1 with `pf already enabled` even though the rules loaded fine — and
+macOS enables `pf` on its own (AirDrop, Internet Sharing, stealth mode), so that is the normal case.
+nulltrace loads and enables separately and checks the real state, so this message means `pf` genuinely
+failed. Verify manually:
+
+```bash
+sudo pfctl -s info | grep Status              # Enabled?
+sudo pfctl -sr | grep "user = $(id -u _nulltrace_tor)"   # our rules loaded?
+```
+
+The status dashboard distinguishes the two: **✅ Aktiviert** = our rules are loaded,
+**⚠️ pf läuft, aber ohne nulltrace-Regeln** = pf is on but somebody else's ruleset.
+
 ### Internet not working after privacy-off
 
 ```bash
@@ -568,6 +637,20 @@ sudo ./scripts/nulltrace_sudoers_setup.sh
 # Then retry:
 newip
 ```
+
+### "MAC-Adresse konnte NICHT geändert werden"
+
+Expected on Apple Silicon — the Wi-Fi driver rejects `SIOCAIFADDR`, and there is no workaround left.
+nulltrace does **not** power-cycle Wi-Fi in that case (that cycle used to drop the link and trigger a
+pointless DHCP round for nothing). Use macOS' own randomisation instead:
+
+```bash
+networksetup -getmacaddress en0        # burned-in hardware address
+ifconfig en0 | grep ether              # what is actually transmitted
+```
+
+If those two differ, *Private Wi-Fi Address* is already active. Set it to **Rotating** under
+System Settings → Wi-Fi → your network → Details.
 
 ### API rate limit errors in myip
 

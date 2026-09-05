@@ -306,10 +306,30 @@ clear_dns_cache() {
 # Firewall aktivieren
 enable_firewall() {
     echo "🔥 Aktiviere Firewall mit Stealth-Mode..."
-    sudo /usr/libexec/ApplicationFirewall/socketfilterfw --setglobalstate on
-    sudo /usr/libexec/ApplicationFirewall/socketfilterfw --setloggingmode on
-    sudo /usr/libexec/ApplicationFirewall/socketfilterfw --setstealthmode on
-    echo "✅ Firewall aktiviert"
+    local fw="/usr/libexec/ApplicationFirewall/socketfilterfw"
+
+    sudo "$fw" --setglobalstate on >/dev/null
+    # --setloggingmode gibt es seit macOS 26 (Tahoe) nicht mehr; ein blinder
+    # Aufruf spuckt nur die usage-Meldung aus. Deshalb vorher nachsehen.
+    if "$fw" -h 2>&1 | grep -q -- "--setloggingmode"; then
+        sudo "$fw" --setloggingmode on >/dev/null
+    fi
+    sudo "$fw" --setstealthmode on >/dev/null
+
+    local global stealth
+    global=$("$fw" --getglobalstate 2>/dev/null)
+    stealth=$("$fw" --getstealthmode 2>/dev/null)
+
+    if echo "$global" | grep -q "enabled"; then
+        if echo "$stealth" | grep -qi "mode is on"; then
+            echo "✅ Firewall aktiviert (Stealth-Mode an)"
+        else
+            echo "✅ Firewall aktiviert"
+            log_warn "Stealth-Mode konnte nicht aktiviert werden"
+        fi
+    else
+        log_error "Firewall konnte nicht aktiviert werden: $global"
+    fi
 }
 
 # DNS auf Privacy-Provider setzen
@@ -395,8 +415,20 @@ remove_tracking_blocks() {
 # Ortungsdienste deaktivieren
 disable_location() {
     echo "📍 Deaktiviere Ortungsdienste..."
+
+    # launchctl unload meldet Erfolg (Exit 0) und tut NICHTS: locationd ist
+    # SIP-geschuetzt, der Unload scheitert mit "Input/output error". Deshalb
+    # das Ergebnis pruefen statt es zu behaupten.
     sudo launchctl unload /System/Library/LaunchDaemons/com.apple.locationd.plist 2>/dev/null
-    echo "✅ Ortungsdienste deaktiviert"
+    sleep 1
+
+    if pgrep -x locationd >/dev/null 2>&1; then
+        log_warn "Ortungsdienste laufen weiter — locationd ist SIP-geschuetzt"
+        echo "  Abschalten nur manuell: Systemeinstellungen → Datenschutz &"
+        echo "  Sicherheit → Ortungsdienste"
+    else
+        echo "✅ Ortungsdienste deaktiviert"
+    fi
 }
 
 # MAC-Adresse ändern
@@ -417,7 +449,8 @@ handle_privacy() {
             echo ""
 
             echo -e "${BLUE}[❶] MAC-Adresse spoofing...${NC}"
-            "$MAC_SCRIPT"
+            local mac_changed="false"
+            "$MAC_SCRIPT" && mac_changed="true"
             echo ""
 
             echo -e "${BLUE}[❷] Privacy-Funktionen aktivieren...${NC}"
@@ -452,7 +485,13 @@ handle_privacy() {
             show_success "🔥 MAXIMALE PRIVATSPHÄRE AKTIVIERT!"
             echo ""
             echo -e "${GREEN}✓ Aktiviert:${NC}"
-            echo "  • MAC-Adresse geändert (permanent)"
+            # Nur behaupten, was auch passiert ist — auf Apple Silicon lehnt der
+            # Wi-Fi-Treiber das MAC-Spoofing ab.
+            if [ "$mac_changed" = "true" ]; then
+                echo "  • MAC-Adresse geändert"
+            else
+                echo "  • MAC-Adresse UNVERÄNDERT (siehe Hinweis oben)"
+            fi
             echo "  • Hostname: $(get_config PRIVACY_HOSTNAME Lisa)"
             if [ "$tor_mode" = "transparent" ]; then
                 echo "  • Tor: SOCKS-Proxy + pf-Killswitch (non-Tor geblockt)"
@@ -583,7 +622,7 @@ show_overall_status() {
         else
             echo "    ├─ System-Proxy: ❌ Deaktiviert"
         fi
-        is_tor=$(secure_curl "https://check.torproject.org/api/ip" --socks5 "localhost:$(get_config TOR_SOCKS_PORT 9050)" 2>/dev/null | jq -r '.IsTor' 2>/dev/null || echo "false")
+        is_tor=$(secure_curl "https://check.torproject.org/api/ip" --socks5-hostname "localhost:$(get_config TOR_SOCKS_PORT 9050)" 2>/dev/null | jq -r '.IsTor' 2>/dev/null || echo "false")
         if [ "$is_tor" = "true" ]; then
             echo "    └─ Verbindung: ✅ Über Tor"
         else
@@ -601,7 +640,8 @@ show_overall_status() {
     if [ -n "$fw_status" ]; then
         echo "    ├─ Status: ✅ Aktiviert"
         local stealth
-        stealth=$(/usr/libexec/ApplicationFirewall/socketfilterfw --getstealthmode 2>/dev/null | grep "enabled")
+        # "Firewall stealth mode is on|off" — kein "enabled" wie beim globalstate
+        stealth=$(/usr/libexec/ApplicationFirewall/socketfilterfw --getstealthmode 2>/dev/null | grep -i "mode is on")
         if [ -n "$stealth" ]; then
             echo "    └─ Stealth-Modus: ✅ Aktiviert"
         else
@@ -656,8 +696,10 @@ show_overall_status() {
 
     # Kill-Switch
     echo -e "${BLUE}[8] Kill-Switch${NC}"
-    if pfctl -s info 2>/dev/null | grep -q "Status: Enabled"; then
+    if pf_nulltrace_rules_loaded; then
         echo "    └─ Status: ✅ Aktiviert"
+    elif pf_is_enabled; then
+        echo "    └─ Status: ⚠️  pf läuft, aber ohne nulltrace-Regeln"
     else
         echo "    └─ Status: ❌ Deaktiviert"
     fi

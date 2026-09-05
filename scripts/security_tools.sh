@@ -26,7 +26,8 @@ system_security_check() {
     if [ -n "$fw_status" ]; then
         echo "    ✅ Firewall ist aktiviert"
         local stealth
-        stealth=$(/usr/libexec/ApplicationFirewall/socketfilterfw --getstealthmode 2>/dev/null | grep "enabled")
+        # "Firewall stealth mode is on|off" — kein "enabled" wie beim globalstate
+        stealth=$(/usr/libexec/ApplicationFirewall/socketfilterfw --getstealthmode 2>/dev/null | grep -i "mode is on")
         if [ -n "$stealth" ]; then
             echo "    ✅ Stealth-Modus aktiviert"
         else
@@ -118,7 +119,7 @@ dns_security_check() {
     local tor_port
     tor_port="$(get_config TOR_SOCKS_PORT 9050)"
     local tor_check
-    tor_check=$(secure_curl "https://check.torproject.org/api/ip" --socks5 "localhost:$tor_port" 2>/dev/null | jq -r '.IsTor' 2>/dev/null)
+    tor_check=$(secure_curl "https://check.torproject.org/api/ip" --socks5-hostname "localhost:$tor_port" 2>/dev/null | jq -r '.IsTor' 2>/dev/null)
 
     if [ "$tor_check" = "true" ]; then
         echo "    ✅ DNS-Anfragen gehen über Tor"
