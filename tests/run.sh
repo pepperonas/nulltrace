@@ -130,7 +130,7 @@ d1="$(create_secure_temp probe)"; d2="$(create_secure_temp probe)"
 check test -d "$d1"
 refute test "$d1" = "$d2"
 case "$d1" in "$NULLTRACE_RUNTIME_DIR"/probe.*) ok ;; *) bad "falscher Ort: $d1" ;; esac
-eq "$(stat -f %Lp "$NULLTRACE_RUNTIME_DIR" 2>/dev/null || stat -c %a "$NULLTRACE_RUNTIME_DIR")" "700"
+eq "$(stat -c %a "$NULLTRACE_RUNTIME_DIR" 2>/dev/null || stat -f %Lp "$NULLTRACE_RUNTIME_DIR")" "700"
 touch "$HOME/.nulltrace/bleibt"
 cleanup_runtime
 refute test -e "$d1"
