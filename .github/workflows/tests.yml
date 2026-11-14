@@ -1,0 +1,23 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v5
+      - name: Syntax check
+        run: for f in nulltrace.sh scripts/*.sh scripts/lib/*.sh tests/*.sh; do bash -n "$f"; done
+      - name: Unit tests
+        run: bash tests/run.sh

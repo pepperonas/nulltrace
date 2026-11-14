@@ -31,7 +31,7 @@ log_to_file() {
     [ -d "$log_dir" ] || mkdir -p "$log_dir"
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] [$level] $*" >> "$log_file"
     # Rotiere bei >1MB
-    if [ -f "$log_file" ] && [ "$(stat -f%z "$log_file" 2>/dev/null || echo 0)" -gt 1048576 ]; then
+    if [ -f "$log_file" ] && [ "$(wc -c < "$log_file" 2>/dev/null | tr -d ' ' || echo 0)" -gt 1048576 ]; then
         mv "$log_file" "${log_file}.1"
     fi
 }
@@ -118,8 +118,12 @@ get_macos_version() {
 # ─── Sichere HTTP-Anfragen ──────────────────────────────────────────────────
 secure_curl() {
     local url="$1"; shift
-    # Erzwinge HTTPS
-    url="${url/http:\/\//https:\/\/}"
+    # Erzwinge HTTPS — nur am Anfang der URL. Ohne den Anker wurde das erste
+    # "http://" irgendwo ersetzt, z. B. in einem Query-Parameter, waehrend die
+    # eigentliche http-URL davor unangetastet blieb.
+    case "$url" in
+        [Hh][Tt][Tt][Pp]://*) url="https://${url#*://}" ;;
+    esac
     curl -4 -s --connect-timeout 5 "$url" "$@"
 }
 
@@ -140,6 +144,8 @@ validate_input() {
 
 validate_country_code() {
     local code="$1"
+    # Genau zwei Grossbuchstaben — sonst passt "DE US" als Teilstring der Liste.
+    [[ "$code" =~ ^[A-Z]{2}$ ]] || return 1
     local valid_codes="DE US UK FR NL CH AT SE NO DK FI IS CA AU JP SG HK ES IT BE LU CZ PL RO BG EE LV LT SK SI HR HU GR CY MT IE PT MX BR AR CL IN KR TH MY ID PH VN TW NZ ZA IL AE TR"
     [[ " $valid_codes " == *" $code "* ]]
 }

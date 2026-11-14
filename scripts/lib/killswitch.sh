@@ -11,7 +11,11 @@ source "$SCRIPT_DIR/utils.sh" 2>/dev/null
 
 KILLSWITCH_PF_RULES="$NULLTRACE_RUNTIME_DIR/pf_killswitch.conf"
 KILLSWITCH_PID_FILE="$NULLTRACE_RUNTIME_DIR/killswitch_monitor.pid"
-KILLSWITCH_PF_BACKUP="/tmp/.nulltrace_pf_backup"
+# Backup im nutzereigenen Runtime-Verzeichnis (0700), NICHT unter /tmp: ein
+# vorhersagbarer /tmp-Pfad liesse einen anderen lokalen Nutzer die Datei
+# vorab anlegen und ihren Inhalt tauschen — disable_killswitch laedt sie per
+# "sudo pfctl -f" als root.
+KILLSWITCH_PF_BACKUP="$NULLTRACE_RUNTIME_DIR/pf_killswitch_backup.conf"
 
 enable_killswitch() {
     ensure_runtime_dir
@@ -213,8 +217,11 @@ show_status() {
     echo ""
 }
 
-# CLI-Interface
-case "$1" in
+# CLI-Interface — nur bei direktem Aufruf, nicht beim Einbinden per source
+# (die Tests laden die Funktionen, ohne dass die Hilfe-Ausgabe laeuft).
+[ "${BASH_SOURCE[0]}" = "$0" ] || return 0
+
+case "${1:-}" in
     enable|on)
         enable_killswitch
         ;;

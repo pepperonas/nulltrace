@@ -665,6 +665,24 @@ TOR_MODE=proxy
 
 This uses a basic SOCKS proxy without pf killswitch — less secure but more compatible.
 
+## Tests
+
+`tests/run.sh` covers the library functions in `scripts/lib/` — input and
+country-code validation, `secure_curl` (HTTPS enforcement), the config loader,
+log rotation, runtime/temp directories, install-path detection, the pf helpers
+(`pf_load_and_enable`, `pf_nulltrace_rules_loaded`), the generated kill-switch
+rules (DHCP in both directions, Tor port from config), monitor shutdown and the
+xxxOS migration. Plain bash, no dependencies:
+
+```bash
+bash tests/run.sh
+```
+
+The suite runs with a throwaway `HOME` under `mktemp -d`; `sudo`, `pfctl`,
+`networksetup` and friends are replaced by stubs that only log their arguments.
+It never touches pf, the network configuration or your real `~/.nulltrace`.
+CI (`.github/workflows/tests.yml`) runs it on macOS and Linux.
+
 ## License
 
 MIT License — (c) 2025 Martin Pfeffer

@@ -32,7 +32,10 @@ sudo ./scripts/tor_transparent.sh stop    # Stop enforcement
 # Sudoers setup (one-time, enables passwordless operation)
 sudo ./scripts/nulltrace_sudoers_setup.sh
 
-# Syntax check (no CI — run manually)
+# Unit tests (CI: .github/workflows/tests.yml, macOS + Linux)
+bash tests/run.sh
+
+# Lint (not in CI — run manually)
 shellcheck nulltrace.sh scripts/*.sh scripts/lib/*.sh
 ```
 
@@ -113,7 +116,7 @@ Fallback mode: `tor_control.sh full-on` starts Tor as current user, sets system 
 | Path | Purpose |
 |------|---------|
 | `~/.nulltrace/config` | User configuration |
-| `~/.nulltrace/runtime/` | PID files, killswitch pf rules (user-owned, mode 700) |
+| `~/.nulltrace/runtime/` | PID files, killswitch pf rules + pf backup (user-owned, mode 700) |
 | `/var/run/nulltrace/` | pf rules + pf backup written by root (tor_transparent.sh) |
 | `~/.nulltrace/original_hostname` | Hostname backup for restore |
 | `~/.nulltrace/nulltrace.log` | Activity log (rotates at 1MB) |
@@ -151,3 +154,10 @@ Fallback mode: `tor_control.sh full-on` starts Tor as current user, sets system 
 - Shell metacharacters must be validated in user input (`validate_input()`).
 - Country codes validated via `validate_country_code()`.
 - The torrc and Tor data directory must be owned by `_nulltrace_tor`, not root or the current user.
+
+## Tests
+
+`tests/run.sh` sources `utils.sh` and `killswitch.sh` with a throwaway `HOME` (mktemp) and a stub directory first in `PATH`; `sudo`/`_pfctl`/`curl` are overridden as shell functions. Rules for new tests:
+- Never let a test reach real pf, sudo, networksetup or the real `~/.nulltrace` — the script aborts if `HOME`, the runtime dir or the pf backup path point outside the temp dir.
+- `killswitch.sh` only runs its CLI `case` when executed, not when sourced (`[ "${BASH_SOURCE[0]}" = "$0" ] || return 0`) — nulltrace.sh always executes it.
+- The kill-switch pf backup lives in `~/.nulltrace/runtime/`, not `/tmp`: a predictable `/tmp` path could be pre-created by another local user and its contents swapped before `disable_killswitch` loads it as root.
